@@ -1,0 +1,41 @@
+digraph Context {
+  graph [rankdir=LR, splines=true, nodesep=0.5, ranksep=0.75, fontname="Liberation Sans", pad=0.25, newrank=true];
+  node  [fontname="Liberation Sans", fontsize=12];
+  edge  [fontname="Liberation Sans", fontsize=10, color="#404040", penwidth=1.1, arrowsize=0.8];
+
+  snmp  [shape=box3d, style=filled, fillcolor="#F2F2F2", label="SNMP-агенти\nобладнання та ДБЖ"];
+  chan  [shape=box3d, style=filled, fillcolor="#F2F2F2", label="Канали доставки\n(Telegram, e-mail)"];
+  eng   [shape=box, style="rounded,filled", fillcolor="#F2F2F2", label="Інженер\nтехпідтримки"];
+  adm   [shape=box, style="rounded,filled", fillcolor="#F2F2F2", label="Адміністратор\nсистеми"];
+
+  subgraph cluster_srv {
+    label="Сервіси NetGuard Monitor — клієнти БД"; fontsize=11; style="dashed,rounded"; color="#7F7F7F";
+    poll  [shape=box, style=filled, fillcolor="#DCE6F2", label="Polling Service", width=2.1];
+    alert [shape=box, style=filled, fillcolor="#DCE6F2", label="Alerting Service", width=2.1];
+    notif [shape=box, style=filled, fillcolor="#DCE6F2", label="Notification Service", width=2.1];
+    api   [shape=box, style=filled, fillcolor="#DCE6F2", label="API Gateway / Auth", width=2.1];
+    rep   [shape=box, style=filled, fillcolor="#DCE6F2", label="Reporting Service", width=2.1];
+  }
+
+  subgraph cluster_db {
+    label="Межа бази даних"; fontsize=11; style="rounded"; color="#BF9000"; penwidth=1.4;
+    db [shape=cylinder, style=filled, fillcolor="#FFF2CC", penwidth=1.6, fontsize=13, height=2.6,
+        label="БД NetGuard Monitor\nPostgreSQL, схема netguard\n\nдовідники · обладнання\nтелеметрія · інциденти\nсповіщення · журнал"];
+  }
+
+  snmp -> poll  [label="значення OID"];
+  chan -> notif [dir=back, label="повідомлення"];
+  eng  -> api   [dir=both, label="HTTPS"];
+  adm  -> api   [dir=both, label="HTTPS"];
+  adm  -> rep   [dir=back, style=dashed, label="звіти"];
+
+  poll  -> db [dir=both, label="→ показники, статус доступності\l← перелік обладнання, параметри SNMP\l"];
+  alert -> db [dir=both, label="→ інциденти, записи журналу\l← пороги, нові показники\l"];
+  notif -> db [dir=both, label="→ сповіщення, статус доставки\l← нові інциденти, контакти\l"];
+  api   -> db [dir=both, label="→ облікові дані, довідники, дії з інцидентами\l← поточний стан, журнал, історія показників\l"];
+  rep   -> db [dir=back, label="← агреговані дані (лише читання)\l"];
+
+  { rank=same; snmp; chan; eng; adm; }
+  { rank=same; poll; alert; notif; api; rep; }
+  alert -> chan [style=invis];
+}

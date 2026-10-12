@@ -1,0 +1,68 @@
+graph Chen {
+  graph [layout=dot, rankdir=TB, splines=true, nodesep=0.35, ranksep=0.45, fontname="Liberation Sans", pad=0.2];
+  node [fontname="Liberation Sans", fontsize=11];
+  edge [fontname="Liberation Sans", fontsize=10, color="#404040"];
+  ROLE [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="РОЛЬ", margin="0.15,0.08"];
+  USER [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="КОРИСТУВАЧ", margin="0.15,0.08"];
+  LOC [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ЛОКАЦІЯ (ВУЗОЛ)", margin="0.15,0.08"];
+  ETYPE [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ТИП\nОБЛАДНАННЯ", margin="0.15,0.08"];
+  EQ [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ОБЛАДНАННЯ", margin="0.15,0.08"];
+  UPS [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=2, label="ДБЖ", margin="0.15,0.08"];
+  METRIC [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="МЕТРИКА", margin="0.15,0.08"];
+  THR [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ПОРІГ", margin="0.15,0.08"];
+  READ [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=2, label="ПОКАЗНИК", margin="0.15,0.08"];
+  INC [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ІНЦИДЕНТ", margin="0.15,0.08"];
+  NOTIF [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="СПОВІЩЕННЯ", margin="0.15,0.08"];
+  LOG [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ПОДІЯ ЖУРНАЛУ", margin="0.15,0.08"];
+  r1 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="надає\nправа", fontsize=9, margin="0.02,0.02"];
+  ROLE -- r1 [taillabel="", headlabel="", label=" 1"];
+  r1 -- USER [label=" N"];
+  r2 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="розміщує", fontsize=9, margin="0.02,0.02"];
+  LOC -- r2 [taillabel="", headlabel="", label=" 1"];
+  r2 -- EQ [label=" N"];
+  r3 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="класифікує", fontsize=9, margin="0.02,0.02"];
+  ETYPE -- r3 [taillabel="", headlabel="", label=" 1"];
+  r3 -- EQ [label=" N"];
+  r4 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=2, label="є", fontsize=9, margin="0.02,0.02"];
+  EQ -- r4 [taillabel="", headlabel="", label=" 1"];
+  r4 -- UPS [label=" 0..1"];
+  r5 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="контролює", fontsize=9, margin="0.02,0.02"];
+  ETYPE -- r5 [taillabel="", headlabel="", label=" 1"];
+  r5 -- THR [label=" N"];
+  r6 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="обмежує", fontsize=9, margin="0.02,0.02"];
+  METRIC -- r6 [taillabel="", headlabel="", label=" 1"];
+  r6 -- THR [label=" N"];
+  r7 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=2, label="вимірює", fontsize=9, margin="0.02,0.02"];
+  EQ -- r7 [taillabel="", headlabel="", label=" 1"];
+  r7 -- READ [label=" N"];
+  r8 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=2, label="описує", fontsize=9, margin="0.02,0.02"];
+  METRIC -- r8 [taillabel="", headlabel="", label=" 1"];
+  r8 -- READ [label=" N"];
+  r9 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="має", fontsize=9, margin="0.02,0.02"];
+  EQ -- r9 [taillabel="", headlabel="", label=" 1"];
+  r9 -- INC [label=" N"];
+  r10 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="порушено", fontsize=9, margin="0.02,0.02"];
+  THR -- r10 [taillabel="", headlabel="", label=" 0..1"];
+  r10 -- INC [label=" N"];
+  r11 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="підтверджує", fontsize=9, margin="0.02,0.02"];
+  USER -- r11 [taillabel="", headlabel="", label=" 0..1"];
+  r11 -- INC [label=" N"];
+  r12 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="породжує", fontsize=9, margin="0.02,0.02"];
+  INC -- r12 [taillabel="", headlabel="", label=" 1"];
+  r12 -- NOTIF [label=" N"];
+  r13 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="отримує", fontsize=9, margin="0.02,0.02"];
+  USER -- r13 [taillabel="", headlabel="", label=" 1"];
+  r13 -- NOTIF [label=" N"];
+  r15 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="ініціює", fontsize=9, margin="0.02,0.02"];
+  USER -- r15 [taillabel="", headlabel="", label=" 0..1"];
+  r15 -- LOG [label=" N"];
+  r16 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="стосується", fontsize=9, margin="0.02,0.02"];
+  EQ -- r16 [taillabel="", headlabel="", label=" 0..1"];
+  r16 -- LOG [label=" N"];
+  r17 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="стосується", fontsize=9, margin="0.02,0.02"];
+  INC -- r17 [taillabel="", headlabel="", label=" 0..1"];
+  r17 -- LOG [label=" N"];
+  { rank=same; ROLE; LOC; ETYPE; METRIC; }
+  { rank=same; USER; EQ; }
+  { rank=same; NOTIF; LOG; }
+}
