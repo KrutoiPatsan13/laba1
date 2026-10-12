@@ -11,6 +11,8 @@
 | `docs/ЛР1_Організація_БД_NetGuard.docx` | Звіт (43 с.): аналіз предметної області, контекстна, логічна та фізична моделі, зв'язок БД з YAML-конфігурацією SNMP, опис 15 таблиць з типами даних, висновки з функціональними вимогами до ЛР2, DDL у додатку |
 | `docs/ЛР1_Організація_БД_NetGuard.pdf` | Той самий звіт у PDF |
 | `sql/schema.sql` | DDL фізичної моделі для PostgreSQL 15+ |
+| `sql/seed_reference.sql` | Довідники, на які посилається YAML: ролі, вузли, метрики |
+| `sql/tests_constraints.sql` | Автотест обмежень: позитивний сценарій + 40 негативних перевірок (PASS/FAIL), без змін у БД |
 | `config/snmp_config.yaml` | Конфігурація SNMP-опитування: облікові дані, профілі (метрика → OID), пристрої |
 | `tools/snmp_config_sync.py` | Прототип завантажувача YAML → БД (одна транзакція, контроль версій за SHA-256) |
 | `docs/diagrams/*.png` | Діаграми: контекстна, ER (нотація Чена), логічна (crow's foot), фізична (3 частини) |
@@ -47,15 +49,21 @@ python3 tools/snmp_config_sync.py config/snmp_config.yaml | psql -d netguard
 Профілі в YAML посилаються на коди метрик із довідника `metric`, а пристрої — на вузли з
 `locations`, тому ці довідники мають бути заповнені заздалегідь.
 
-## Розгортання схеми
+## Розгортання БД
 
 ```bash
 createdb netguard
-psql -d netguard -v ON_ERROR_STOP=1 -f sql/schema.sql
+psql -d netguard -v ON_ERROR_STOP=1 -f sql/schema.sql             # 1. схема
+psql -d netguard -v ON_ERROR_STOP=1 -f sql/seed_reference.sql     # 2. довідники
+python3 tools/snmp_config_sync.py config/snmp_config.yaml \
+  | psql -d netguard                                              # 3. YAML-конфігурація SNMP
+psql -d netguard -v ON_ERROR_STOP=1 -f sql/tests_constraints.sql  # 4. перевірка обмежень
 ```
 
-Скрипт можна виконувати повторно: він видаляє і заново створює схему `netguard`.
-Перевірено на PostgreSQL 16.
+`schema.sql` можна виконувати повторно: він видаляє і заново створює схему `netguard`.
+`seed_reference.sql` теж можна запускати повторно: наявні рядки не змінюються.
+`tests_constraints.sql` працює в транзакції з відкатом, тож даних у БД не лишає. Якщо хоч одна
+перевірка не пройшла, psql завершується з помилкою. Усе перевірено на PostgreSQL 16.
 
 ## Перегенерація діаграм
 
