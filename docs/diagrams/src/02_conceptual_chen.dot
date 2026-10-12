@@ -14,6 +14,9 @@ graph Chen {
   INC [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ІНЦИДЕНТ", margin="0.15,0.08"];
   NOTIF [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="СПОВІЩЕННЯ", margin="0.15,0.08"];
   LOG [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ПОДІЯ ЖУРНАЛУ", margin="0.15,0.08"];
+  CFG [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="КОНФІГУРАЦІЯ SNMP\n(версія YAML)", margin="0.15,0.08"];
+  CRED [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=1, label="ОБЛІКОВИЙ\nЗАПИС SNMP", margin="0.15,0.08"];
+  OIDMAP [shape=box, style=filled, fillcolor="#DCE6F2", peripheries=2, label="ШАБЛОН\nОПИТУВАННЯ (OID)", margin="0.15,0.08"];
   r1 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="надає\nправа", fontsize=9, margin="0.02,0.02"];
   ROLE -- r1 [taillabel="", headlabel="", label=" 1"];
   r1 -- USER [label=" N"];
@@ -62,7 +65,28 @@ graph Chen {
   r17 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="стосується", fontsize=9, margin="0.02,0.02"];
   INC -- r17 [taillabel="", headlabel="", label=" 0..1"];
   r17 -- LOG [label=" N"];
-  { rank=same; ROLE; LOC; ETYPE; METRIC; }
-  { rank=same; USER; EQ; }
+  r18 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="визначає", fontsize=9, margin="0.02,0.02"];
+  CFG -- r18 [taillabel="", headlabel="", label=" 1"];
+  r18 -- CRED [label=" N"];
+  r19 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="визначає", fontsize=9, margin="0.02,0.02"];
+  CFG -- r19 [taillabel="", headlabel="", label=" 1"];
+  r19 -- OIDMAP [label=" N"];
+  r20 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="синхронізує", fontsize=9, margin="0.02,0.02"];
+  CFG -- r20 [taillabel="", headlabel="", label=" 0..1"];
+  r20 -- EQ [label=" N"];
+  r21 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="автентифікує", fontsize=9, margin="0.02,0.02"];
+  CRED -- r21 [taillabel="", headlabel="", label=" 1"];
+  r21 -- EQ [label=" N"];
+  r22 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=2, label="опитується\nза", fontsize=9, margin="0.02,0.02"];
+  ETYPE -- r22 [taillabel="", headlabel="", label=" 1"];
+  r22 -- OIDMAP [label=" N"];
+  r23 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=2, label="зчитується\nз", fontsize=9, margin="0.02,0.02"];
+  METRIC -- r23 [taillabel="", headlabel="", label=" 1"];
+  r23 -- OIDMAP [label=" N"];
+  r24 [shape=diamond, style=filled, fillcolor="#FFF2CC", peripheries=1, label="завантажує", fontsize=9, margin="0.02,0.02"];
+  USER -- r24 [taillabel="", headlabel="", label=" 0..1"];
+  r24 -- CFG [label=" N"];
+  { rank=same; ROLE; LOC; ETYPE; METRIC; CFG; }
+  { rank=same; USER; EQ; CRED; }
   { rank=same; NOTIF; LOG; }
 }

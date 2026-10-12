@@ -2,6 +2,9 @@
 --  NetGuard Monitor — фізична модель бази даних
 --  СУБД: PostgreSQL 15+ (перевірено на PostgreSQL 16)
 --  Лабораторна робота №1, дисципліна «Організація баз даних»
+--  Конфігурація SNMP-опитування задається у файлі config/snmp_config.yaml
+--  і застосовується до таблиць snmp_config, snmp_credential, snmp_oid_map,
+--  equipment_type та equipment (розділ 3 цього скрипту).
 --
 --  Запуск:  psql -d netguard -v ON_ERROR_STOP=1 -f sql/schema.sql
 -- =====================================================================
@@ -17,6 +20,8 @@ CREATE TYPE location_kind      AS ENUM ('data_center', 'access_node');
 CREATE TYPE equipment_category AS ENUM ('switch', 'router', 'onu', 'ups');
 CREATE TYPE equipment_status   AS ENUM ('unknown', 'online', 'offline', 'maintenance');
 CREATE TYPE snmp_version       AS ENUM ('v1', 'v2c', 'v3');
+CREATE TYPE snmp_auth_proto    AS ENUM ('MD5', 'SHA', 'SHA224', 'SHA256', 'SHA384', 'SHA512');
+CREATE TYPE snmp_priv_proto    AS ENUM ('DES', 'AES', 'AES192', 'AES256');
 CREATE TYPE severity_level     AS ENUM ('warning', 'critical');
 CREATE TYPE incident_kind      AS ENUM ('threshold', 'offline');
 CREATE TYPE incident_status    AS ENUM ('new', 'escalated', 'acknowledged', 'resolved', 'closed');
@@ -72,11 +77,14 @@ CREATE TABLE equipment_type (
     id          SMALLINT           GENERATED ALWAYS AS IDENTITY,
     name        VARCHAR(100)       NOT NULL,
     category    equipment_category NOT NULL,
-    vendor      VARCHAR(50),
-    snmp_mib    VARCHAR(50),
-    description TEXT,
-    CONSTRAINT pk_equipment_type      PRIMARY KEY (id),
-    CONSTRAINT uq_equipment_type_name UNIQUE (name)
+    vendor       VARCHAR(50),
+    snmp_mib     VARCHAR(100),
+    snmp_profile VARCHAR(50),
+    description  TEXT,
+    CONSTRAINT pk_equipment_type         PRIMARY KEY (id),
+    CONSTRAINT uq_equipment_type_name    UNIQUE (name),
+    CONSTRAINT uq_equipment_type_profile UNIQUE (snmp_profile),
+    CONSTRAINT ck_equipment_type_profile CHECK (snmp_profile ~ '^[a-z0-9][a-z0-9-]*$')
 );
 
 CREATE TABLE metric (
@@ -91,7 +99,70 @@ CREATE TABLE metric (
 );
 
 -- ---------------------------------------------------------------------
--- 3. Обладнання
+-- 3. Конфігурація SNMP-опитування (зв'язок із файлом config/snmp_config.yaml)
+-- ---------------------------------------------------------------------
+-- Реєстр версій YAML-файлу: кожне успішне застосування файлу — новий рядок
+CREATE TABLE snmp_config (
+    id             INTEGER      GENERATED ALWAYS AS IDENTITY,
+    file_path      VARCHAR(255) NOT NULL,
+    sha256         CHAR(64)     NOT NULL,
+    format_version SMALLINT     NOT NULL,
+    content        JSONB        NOT NULL,
+    loaded_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    loaded_by      INTEGER,
+    is_active      BOOLEAN      NOT NULL DEFAULT FALSE,
+    CONSTRAINT pk_snmp_config         PRIMARY KEY (id),
+    CONSTRAINT fk_snmp_config_user    FOREIGN KEY (loaded_by) REFERENCES users (id)
+                                      ON DELETE SET NULL,
+    CONSTRAINT uq_snmp_config_sha256  UNIQUE (sha256),
+    CONSTRAINT ck_snmp_config_sha256  CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT ck_snmp_config_path    CHECK (file_path ~ '[.]ya?ml$'),
+    CONSTRAINT ck_snmp_config_version CHECK (format_version > 0),
+    CONSTRAINT ck_snmp_config_content CHECK (jsonb_typeof(content) = 'object')
+);
+
+-- Облікові дані SNMP (розділ credentials YAML); секрет у БД не зберігається,
+-- лише ім'я змінної середовища, з якої його читає Polling Service
+CREATE TABLE snmp_credential (
+    id            SMALLINT        GENERATED ALWAYS AS IDENTITY,
+    config_id     INTEGER         NOT NULL,
+    name          VARCHAR(50)     NOT NULL,
+    snmp_version  snmp_version    NOT NULL,
+    username      VARCHAR(64),
+    auth_protocol snmp_auth_proto,
+    priv_protocol snmp_priv_proto,
+    secret_ref    VARCHAR(100)    NOT NULL,
+    CONSTRAINT pk_snmp_credential        PRIMARY KEY (id),
+    CONSTRAINT fk_snmp_credential_config FOREIGN KEY (config_id) REFERENCES snmp_config (id)
+                                         ON DELETE RESTRICT,
+    CONSTRAINT uq_snmp_credential_name   UNIQUE (name),
+    CONSTRAINT ck_snmp_credential_name   CHECK (name ~ '^[a-z0-9][a-z0-9-]*$'),
+    CONSTRAINT ck_snmp_credential_secret CHECK (secret_ref ~ '^[A-Z][A-Z0-9_]*$'),
+    CONSTRAINT ck_snmp_credential_v3     CHECK ((snmp_version = 'v3') = (username IS NOT NULL)),
+    CONSTRAINT ck_snmp_credential_auth   CHECK (snmp_version = 'v3' OR (auth_protocol IS NULL AND priv_protocol IS NULL)),
+    CONSTRAINT ck_snmp_credential_priv   CHECK (priv_protocol IS NULL OR auth_protocol IS NOT NULL)
+);
+
+-- Шаблон опитування (розділ profiles.*.metrics YAML): з якого OID читати метрику для типу обладнання
+CREATE TABLE snmp_oid_map (
+    equipment_type_id SMALLINT      NOT NULL,
+    metric_id         SMALLINT      NOT NULL,
+    oid               VARCHAR(128)  NOT NULL,
+    scale             NUMERIC(12,6) NOT NULL DEFAULT 1,
+    config_id         INTEGER       NOT NULL,
+    CONSTRAINT pk_snmp_oid_map        PRIMARY KEY (equipment_type_id, metric_id),
+    CONSTRAINT fk_oid_map_type        FOREIGN KEY (equipment_type_id) REFERENCES equipment_type (id)
+                                      ON DELETE CASCADE,
+    CONSTRAINT fk_oid_map_metric      FOREIGN KEY (metric_id) REFERENCES metric (id)
+                                      ON DELETE RESTRICT,
+    CONSTRAINT fk_oid_map_config      FOREIGN KEY (config_id) REFERENCES snmp_config (id)
+                                      ON DELETE RESTRICT,
+    CONSTRAINT ck_oid_map_oid         CHECK (oid ~ '^[0-2](\.[0-9]+)+$'),
+    CONSTRAINT ck_oid_map_scale       CHECK (scale <> 0)
+);
+
+-- ---------------------------------------------------------------------
+-- 4. Обладнання
 -- ---------------------------------------------------------------------
 CREATE TABLE equipment (
     id              INTEGER          GENERATED ALWAYS AS IDENTITY,
@@ -101,9 +172,9 @@ CREATE TABLE equipment (
     model           VARCHAR(100),
     serial_number   VARCHAR(50),
     ip_address      INET             NOT NULL,
+    credential_id   SMALLINT         NOT NULL,
+    config_id       INTEGER,
     snmp_port       INTEGER          NOT NULL DEFAULT 161,
-    snmp_version    snmp_version     NOT NULL DEFAULT 'v2c',
-    snmp_community  VARCHAR(64),
     poll_interval_s SMALLINT         NOT NULL DEFAULT 60,
     status          equipment_status NOT NULL DEFAULT 'unknown',
     failed_polls    SMALLINT         NOT NULL DEFAULT 0,
@@ -115,6 +186,10 @@ CREATE TABLE equipment (
     CONSTRAINT fk_equipment_type     FOREIGN KEY (type_id) REFERENCES equipment_type (id)
                                      ON DELETE RESTRICT,
     CONSTRAINT fk_equipment_location FOREIGN KEY (location_id) REFERENCES locations (id)
+                                     ON DELETE RESTRICT,
+    CONSTRAINT fk_equipment_credential FOREIGN KEY (credential_id) REFERENCES snmp_credential (id)
+                                     ON DELETE RESTRICT,
+    CONSTRAINT fk_equipment_config   FOREIGN KEY (config_id) REFERENCES snmp_config (id)
                                      ON DELETE RESTRICT,
     CONSTRAINT uq_equipment_name     UNIQUE (name),
     CONSTRAINT uq_equipment_serial   UNIQUE (serial_number),
@@ -145,7 +220,7 @@ CREATE TABLE ups_details (
 );
 
 -- ---------------------------------------------------------------------
--- 4. Порогові значення
+-- 5. Порогові значення
 -- ---------------------------------------------------------------------
 CREATE TABLE threshold (
     id                INTEGER        GENERATED ALWAYS AS IDENTITY,
@@ -167,7 +242,7 @@ CREATE TABLE threshold (
 );
 
 -- ---------------------------------------------------------------------
--- 5. Телеметрія (секціонована за місяцями таблиця)
+-- 6. Телеметрія (секціонована за місяцями таблиця)
 -- ---------------------------------------------------------------------
 CREATE TABLE metric_reading (
     equipment_id INTEGER          NOT NULL,
@@ -201,7 +276,7 @@ END $$;
 CREATE TABLE metric_reading_default PARTITION OF metric_reading DEFAULT;
 
 -- ---------------------------------------------------------------------
--- 6. Інциденти, сповіщення, журнал подій
+-- 7. Інциденти, сповіщення, журнал подій
 -- ---------------------------------------------------------------------
 CREATE TABLE incident (
     id              BIGINT           GENERATED ALWAYS AS IDENTITY,
@@ -282,12 +357,20 @@ CREATE TABLE event_log (
 );
 
 -- ---------------------------------------------------------------------
--- 7. Індекси (PostgreSQL не створює індекси для зовнішніх ключів автоматично)
+-- 8. Індекси (PostgreSQL не створює індекси для зовнішніх ключів автоматично)
 -- ---------------------------------------------------------------------
 CREATE INDEX ix_users_role             ON users (role_id);
 CREATE INDEX ix_equipment_type         ON equipment (type_id);
 CREATE INDEX ix_equipment_location     ON equipment (location_id);
 CREATE INDEX ix_equipment_status       ON equipment (status) WHERE is_active;
+CREATE INDEX ix_equipment_credential   ON equipment (credential_id);
+CREATE INDEX ix_equipment_config       ON equipment (config_id) WHERE config_id IS NOT NULL;
+CREATE INDEX ix_snmp_credential_config ON snmp_credential (config_id);
+CREATE INDEX ix_oid_map_metric         ON snmp_oid_map (metric_id);
+CREATE INDEX ix_oid_map_config         ON snmp_oid_map (config_id);
+CREATE INDEX ix_snmp_config_user       ON snmp_config (loaded_by) WHERE loaded_by IS NOT NULL;
+-- активною може бути лише одна версія YAML-конфігурації
+CREATE UNIQUE INDEX uq_snmp_config_active ON snmp_config ((TRUE)) WHERE is_active;
 CREATE INDEX ix_threshold_metric       ON threshold (metric_id);
 CREATE INDEX ix_reading_read_at_brin   ON metric_reading USING BRIN (read_at);
 CREATE INDEX ix_incident_equipment     ON incident (equipment_id, opened_at DESC);
@@ -308,7 +391,7 @@ CREATE INDEX ix_event_log_user         ON event_log (user_id) WHERE user_id IS N
 CREATE INDEX ix_event_log_incident     ON event_log (incident_id) WHERE incident_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------
--- 8. Коментарі до об'єктів (словник даних у самій БД)
+-- 9. Коментарі до об'єктів (словник даних у самій БД)
 -- ---------------------------------------------------------------------
 COMMENT ON SCHEMA netguard              IS 'NetGuard Monitor — моніторинг мережевого обладнання та ДБЖ';
 COMMENT ON TABLE  roles                 IS 'Довідник ролей доступу (Сапорт, Адміністратор)';
@@ -316,6 +399,9 @@ COMMENT ON TABLE  users                 IS 'Облікові записи кор
 COMMENT ON TABLE  locations             IS 'Вузли провайдера: ЦОД і районні вузли доступу';
 COMMENT ON TABLE  equipment_type        IS 'Довідник типів (моделей) обладнання з профілем SNMP MIB';
 COMMENT ON TABLE  metric                IS 'Довідник метрик телеметрії та одиниць виміру';
+COMMENT ON TABLE  snmp_config           IS 'Версії YAML-файлу конфігурації SNMP (config/snmp_config.yaml), застосовані до БД';
+COMMENT ON TABLE  snmp_credential       IS 'Облікові дані SNMP з розділу credentials YAML (без секретів)';
+COMMENT ON TABLE  snmp_oid_map          IS 'Шаблони опитування: OID метрики для типу обладнання (розділ profiles YAML)';
 COMMENT ON TABLE  equipment             IS 'Одиниці мережевого обладнання та ДБЖ, що опитуються за SNMP';
 COMMENT ON TABLE  ups_details           IS 'Додаткові паспортні характеристики ДБЖ (підтип equipment, 1:1)';
 COMMENT ON TABLE  threshold             IS 'Порогові значення метрик для типу обладнання';
@@ -324,6 +410,11 @@ COMMENT ON TABLE  incident              IS 'Інциденти (аварії) т
 COMMENT ON TABLE  notification          IS 'Сповіщення про інциденти за каналами доставки';
 COMMENT ON TABLE  event_log             IS 'Журнал подій: зміни стану, інциденти, дії користувачів';
 COMMENT ON COLUMN users.password_hash   IS 'Хеш пароля bcrypt (60 символів); відкритий пароль не зберігається';
+COMMENT ON COLUMN snmp_config.content   IS 'Розібраний вміст YAML-файлу (знімок для аудиту та відкату)';
+COMMENT ON COLUMN snmp_credential.secret_ref IS 'Ім''я змінної середовища з community/паролем (${SECRET_REF} у YAML)';
+COMMENT ON COLUMN snmp_oid_map.scale    IS 'Множник: значення метрики = сире значення OID × scale';
+COMMENT ON COLUMN equipment_type.snmp_profile IS 'Ключ профілю в розділі profiles YAML-файлу';
+COMMENT ON COLUMN equipment.config_id   IS 'Версія YAML, що востаннє синхронізувала пристрій; NULL — доданий вручну';
 COMMENT ON COLUMN equipment.failed_polls IS 'Кількість поспіль невдалих опитувань; 3 і більше — статус offline (SR-04.2)';
 COMMENT ON COLUMN threshold.min_value   IS 'Нижня межа норми; значення < min_value — порушення';
 COMMENT ON COLUMN threshold.max_value   IS 'Верхня межа норми; значення > max_value — порушення';

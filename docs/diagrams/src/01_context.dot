@@ -7,6 +7,7 @@ digraph Context {
   chan  [shape=box3d, style=filled, fillcolor="#F2F2F2", label="Канали доставки\n(Telegram, e-mail)"];
   eng   [shape=box, style="rounded,filled", fillcolor="#F2F2F2", label="Інженер\nтехпідтримки"];
   adm   [shape=box, style="rounded,filled", fillcolor="#F2F2F2", label="Адміністратор\nсистеми"];
+  yaml  [shape=note, style=filled, fillcolor="#E4DFEC", label="snmp_config.yaml\n(конфігурація SNMP)"];
 
   subgraph cluster_srv {
     label="Сервіси NetGuard Monitor — клієнти БД"; fontsize=11; style="dashed,rounded"; color="#7F7F7F";
@@ -20,22 +21,24 @@ digraph Context {
   subgraph cluster_db {
     label="Межа бази даних"; fontsize=11; style="rounded"; color="#BF9000"; penwidth=1.4;
     db [shape=cylinder, style=filled, fillcolor="#FFF2CC", penwidth=1.6, fontsize=13, height=2.6,
-        label="БД NetGuard Monitor\nPostgreSQL, схема netguard\n\nдовідники · обладнання\nтелеметрія · інциденти\nсповіщення · журнал"];
+        label="БД NetGuard Monitor\nPostgreSQL, схема netguard\n\nдовідники · конфігурація SNMP\nобладнання · телеметрія\nінциденти · сповіщення · журнал"];
   }
 
   snmp -> poll  [label="значення OID"];
+  yaml -> poll  [label="профілі, OID, облікові\nдані, пристрої"];
+  adm  -> yaml  [style=dashed, label="редагує (git)"];
   chan -> notif [dir=back, label="повідомлення"];
   eng  -> api   [dir=both, label="HTTPS"];
   adm  -> api   [dir=both, label="HTTPS"];
   adm  -> rep   [dir=back, style=dashed, label="звіти"];
 
-  poll  -> db [dir=both, label="→ показники, статус доступності\l← перелік обладнання, параметри SNMP\l"];
+  poll  -> db [dir=both, label="→ версія YAML, облікові дані, OID, пристрої\l→ показники, статус доступності\l← план опитування (пристрої, OID)\l"];
   alert -> db [dir=both, label="→ інциденти, записи журналу\l← пороги, нові показники\l"];
   notif -> db [dir=both, label="→ сповіщення, статус доставки\l← нові інциденти, контакти\l"];
   api   -> db [dir=both, label="→ облікові дані, довідники, дії з інцидентами\l← поточний стан, журнал, історія показників\l"];
   rep   -> db [dir=back, label="← агреговані дані (лише читання)\l"];
 
-  { rank=same; snmp; chan; eng; adm; }
+  { rank=same; snmp; yaml; chan; eng; adm; }
   { rank=same; poll; alert; notif; api; rep; }
   alert -> chan [style=invis];
 }
