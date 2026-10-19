@@ -7,8 +7,12 @@ equipment_type, snmp_oid_map та equipment:
 * файл, чия контрольна сума збігається з активною версією, — пропуск, нічого не змінюється;
 * файл, що вже застосовувався раніше (та сама контрольна сума, версія неактивна), —
   ця версія знову стає активною, і таблиці синхронізуються з її вмістом;
+* профіль ідентифікується за ключем (equipment_type.snmp_profile); профілі, яких більше немає
+  у файлі, лишаються в БД (на них посилаються пороги та історія), назви профілів можна
+  поміняти місцями;
 * пристрій ідентифікується за name: зміна IP оновлює наявний запис (історія зберігається),
-  а IP, зайнятий іншим активним пристроєм, — помилка й відкат;
+  пристрої у файлі можуть обмінятися IP-адресами, а IP, зайнятий активним пристроєм поза
+  файлом, — помилка й відкат;
 * пристрої, яких більше немає у файлі, деактивуються (is_active = FALSE), не видаляються;
   їхні IP-адреси можна віддати новим пристроям (перейменування = новий запис);
 * облікові записи, яких немає у файлі, видаляються лише тоді, коли на них не посилається
@@ -86,9 +90,26 @@ def as_int(value, where, lo, hi):
     return value
 
 
-def as_text(value, where):
+def as_text(value, where, maxlen):
     need(isinstance(value, str) and value.strip() == value and value != "",
          f"{where}: очікується непорожній рядок без пробілів на краях (за потреби — у лапках)")
+    need(len(value) <= maxlen, f"{where}: довжина {len(value)} > {maxlen} (обмеження стовпця в БД)")
+    return value
+
+
+def as_key(value, regex, where, maxlen, hint):
+    need(isinstance(value, str) and regex.match(value), f"{where}: {hint}")
+    need(len(value) <= maxlen, f"{where}: довжина {len(value)} > {maxlen} (обмеження стовпця в БД)")
+    return value
+
+
+def as_scale(value, where):
+    """Множник для snmp_oid_map.scale NUMERIC(12,6): ненульовий, |x| < 10^6, до 6 знаків після коми."""
+    need(isinstance(value, (int, float)) and not isinstance(value, bool), f"{where}: очікується число")
+    d = Decimal(str(value))
+    need(d.is_finite() and d != 0, f"{where}: ненульове скінченне число")
+    need(abs(d) < 10 ** 6, f"{where}: |{value}| має бути менше 1000000")
+    need(d.normalize().as_tuple().exponent >= -6, f"{where}: не більше 6 знаків після коми")
     return value
 
 
@@ -110,40 +131,48 @@ def validate(cfg):
     need(isinstance(creds, dict) and creds, "credentials: потрібен непорожній словник")
     for name, c in creds.items():
         where = f"credentials.{name}"
-        need(isinstance(name, str) and NAME_RE.match(name), f"{where}: ім'я — малі латинські літери, цифри, «-»")
+        as_key(name, NAME_RE, where, 50, "ім'я — малі латинські літери, цифри, «-»")
         check_keys(c, CREDENTIAL_KEYS, where)
         need(c.get("version") in SNMP_VERSIONS, f"{where}.version: одне з {sorted(SNMP_VERSIONS)}")
         need(isinstance(c.get("secret"), str) and SECRET_RE.match(c["secret"]),
              f"{where}.secret: лише посилання на змінну середовища ${{ІМ'Я}}, не відкритий секрет")
+        need(len(c["secret"]) <= 103, f"{where}.secret: ім'я змінної довше за 100 символів")
         if c["version"] == "v3":
-            as_text(c.get("username"), f"{where}.username")
-            need(c.get("auth_protocol", "SHA") in AUTH, f"{where}.auth_protocol: одне з {sorted(AUTH)}")
+            # секрет у файлі обов'язковий, тож для v3 обов'язковий і протокол автентифікації
+            # (рівень authNoPriv або authPriv); неявного значення за замовчуванням немає
+            as_text(c.get("username"), f"{where}.username", 64)
+            need(c.get("auth_protocol") in AUTH, f"{where}.auth_protocol: обов'язковий для v3, одне з {sorted(AUTH)}")
             need(c.get("priv_protocol") is None or c["priv_protocol"] in PRIV, f"{where}.priv_protocol: одне з {sorted(PRIV)}")
-            need(c.get("priv_protocol") is None or c.get("auth_protocol") is not None,
-                 f"{where}: шифрування (priv_protocol) можливе лише разом з auth_protocol")
         else:
             need(not ({"username", "auth_protocol", "priv_protocol"} & set(c)),
                  f"{where}: username/auth_protocol/priv_protocol дозволені лише для v3")
 
     profiles = cfg["profiles"]
     need(isinstance(profiles, dict) and profiles, "profiles: потрібен непорожній словник")
+    pnames = set()
     for key, p in profiles.items():
         where = f"profiles.{key}"
-        need(isinstance(key, str) and NAME_RE.match(key), f"{where}: ключ — малі латинські літери, цифри, «-»")
+        as_key(key, NAME_RE, where, 50, "ключ — малі латинські літери, цифри, «-»")
         check_keys(p, PROFILE_KEYS, where)
-        as_text(p.get("name"), f"{where}.name")
+        as_text(p.get("name"), f"{where}.name", 100)
+        need(not p["name"].startswith("~"), f"{where}.name: не може починатися з «~» (службовий префікс)")
+        need(p["name"] not in pnames, f"{where}.name: назва «{p['name']}» повторюється у файлі")
+        pnames.add(p["name"])
         need(p.get("category") in CATEGORIES, f"{where}.category: одне з {sorted(CATEGORIES)}")
+        if "vendor" in p:
+            as_text(p["vendor"], f"{where}.vendor", 50)
+        if "mib" in p:
+            as_text(p["mib"], f"{where}.mib", 100)
         metrics = p.get("metrics")
         need(isinstance(metrics, dict) and metrics, f"{where}.metrics: потрібен непорожній словник")
         for code, m in metrics.items():
             mw = f"{where}.metrics.{code}"
-            need(isinstance(code, str) and METRIC_RE.match(code), f"{mw}: код метрики — малі латинські літери, цифри, «_»")
+            as_key(code, METRIC_RE, mw, 50, "код метрики — малі латинські літери, цифри, «_»")
             check_keys(m, METRIC_KEYS, mw)
             need(isinstance(m.get("oid"), str) and OID_RE.match(m["oid"]),
                  f"{mw}.oid: числовий OID рядком (напр. 1.3.6.1.2.1.1.3.0)")
-            scale = m.get("scale", 1)
-            need(isinstance(scale, (int, float)) and not isinstance(scale, bool) and scale != 0,
-                 f"{mw}.scale: ненульове число")
+            need(len(m["oid"].lstrip(".")) <= 128, f"{mw}.oid: довжина > 128 (обмеження стовпця в БД)")
+            as_scale(m.get("scale", 1), f"{mw}.scale")
 
     devices = cfg["devices"]
     need(isinstance(devices, list) and devices, "devices: потрібен непорожній список")
@@ -153,9 +182,12 @@ def validate(cfg):
         check_keys(dev, DEVICE_KEYS, where)
         need({"name", "ip", "location", "profile", "credential"} <= set(dev),
              f"{where}: обов'язкові name, ip, location, profile, credential")
-        as_text(dev["name"], f"{where}.name")
-        as_text(dev["location"], f"{where}.location")
+        as_text(dev["name"], f"{where}.name", 100)
+        as_text(dev["location"], f"{where}.location", 100)
+        as_text(dev["profile"], f"{where}.profile", 50)
+        as_text(dev["credential"], f"{where}.credential", 50)
         need(isinstance(dev["ip"], str), f"{where}.ip: IP-адресу треба взяти в лапки (YAML прочитав {dev['ip']!r})")
+        need("%" not in dev["ip"], f"{where}.ip: ідентифікатор зони (%…) у БД не зберігається — вкажіть адресу без нього")
         try:
             ip = ipaddress.ip_address(dev["ip"])
         except ValueError:
@@ -218,16 +250,21 @@ def build_sql(cfg, raw, container_path):
     # credentials -> snmp_credential (UPDATE + INSERT ... WHERE NOT EXISTS: послідовність не витрачається)
     for name, c in cfg["credentials"].items():
         secret = SECRET_RE.match(c["secret"]).group(1)
-        auth = c.get("auth_protocol", "SHA") if c["version"] == "v3" else None
         vals = (f"snmp_version = {q(c['version'])}, username = {q(c.get('username'))}, "
-                f"auth_protocol = {q(auth)}, priv_protocol = {q(c.get('priv_protocol'))}, secret_ref = {q(secret)}")
+                f"auth_protocol = {q(c.get('auth_protocol'))}, priv_protocol = {q(c.get('priv_protocol'))}, "
+                f"secret_ref = {q(secret)}")
         out.append(f"UPDATE snmp_credential SET config_id = (SELECT id FROM cur), {vals} WHERE name = {q(name)};")
         out.append(
             "INSERT INTO snmp_credential (config_id, name, snmp_version, username, auth_protocol, priv_protocol, secret_ref) "
-            f"SELECT id, {q(name)}, {q(c['version'])}, {q(c.get('username'))}, {q(auth)}, {q(c.get('priv_protocol'))}, "
+            f"SELECT id, {q(name)}, {q(c['version'])}, {q(c.get('username'))}, {q(c.get('auth_protocol'))}, "
+            f"{q(c.get('priv_protocol'))}, "
             f"{q(secret)} FROM cur WHERE NOT EXISTS (SELECT 1 FROM snmp_credential WHERE name = {q(name)});")
 
-    # profiles -> equipment_type (за snmp_profile) + повна заміна шаблону snmp_oid_map
+    # profiles -> equipment_type (за snmp_profile) + повна заміна шаблону snmp_oid_map.
+    # Назва типу унікальна й перевіряється одразу для кожного рядка, тому спершу профілі з файлу
+    # отримують тимчасові назви «~id» — тоді дві назви можна поміняти місцями.
+    keys = ", ".join(q(k) for k in cfg["profiles"])
+    out.append(f"UPDATE equipment_type SET name = '~' || id WHERE snmp_profile IN ({keys});")
     for key, p in cfg["profiles"].items():
         vals = (f"name = {q(p['name'])}, category = {q(p['category'])}, vendor = {q(p.get('vendor'))}, "
                 f"snmp_mib = {q(p.get('mib'))}")
@@ -245,11 +282,13 @@ def build_sql(cfg, raw, container_path):
                 f"{type_id}, (SELECT id FROM metric WHERE code = {q(code)}), {q(m['oid'].lstrip('.'))}, "
                 f"{num(m.get('scale', 1))}, id FROM cur;")
 
-    # devices -> equipment: ідентифікація за name; IP, зайнятий іншим активним пристроєм, — помилка
-    # uq_equipment_ip. Спочатку деактивуються пристрої, яких немає у файлі, — тоді їхні IP-адреси
-    # можна одразу віддати новим пристроям (історія лишається за старими записами).
+    # devices -> equipment: ідентифікація за name. uq_equipment_ip перевіряється одразу для кожного
+    # рядка, тому спершу деактивуються всі пристрої, керовані файлом (і ті, що є у файлі): IP-адреси
+    # зниклих пристроїв можна віддати новим, а пристрої з файлу — обміняти адресами. Пристрої з
+    # файлу знову стають активними нижче; зниклі лишаються неактивними разом зі своєю історією.
+    # IP, зайнятий активним пристроєм поза файлом, — помилка uq_equipment_ip і відкат.
     names = ", ".join(q(x["name"]) for x in cfg["devices"])
-    out.append(f"UPDATE equipment SET is_active = FALSE WHERE config_id IS NOT NULL AND is_active AND name NOT IN ({names});")
+    out.append(f"UPDATE equipment SET is_active = FALSE WHERE is_active AND (config_id IS NOT NULL OR name IN ({names}));")
     for dev in cfg["devices"]:
         port = num(dev.get("port", d["port"]))
         interval = num(dev.get("poll_interval_s", d["poll_interval_s"]))
@@ -287,6 +326,12 @@ def main():
         sql = build_sql(cfg, raw, container_path)
     except (ConfigError, yaml.YAMLError) as e:
         print(f"ПОМИЛКА у {src}: {e}", file=sys.stderr)
+        return 2
+    except (TypeError, ValueError, KeyError, AttributeError) as e:
+        print(f"ПОМИЛКА у {src}: значення неочікуваного типу або формату ({type(e).__name__}: {e})", file=sys.stderr)
+        return 2
+    except OSError as e:
+        print(f"ПОМИЛКА: не вдалося прочитати {src}: {e}", file=sys.stderr)
         return 2
     print(sql)
     return 0

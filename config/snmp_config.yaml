@@ -63,7 +63,7 @@ profiles:
       cpu_load:    { oid: 1.3.6.1.4.1.9.9.109.1.1.1.1.8.1 }                     # cpmCPUTotal5minRev, %
       temperature: { oid: 1.3.6.1.4.1.9.9.13.1.3.1.3.1 }                        # ciscoEnvMonTemperatureStatusValue, °C
 
-# Пристрої -> equipment (зіставлення за ip; location — назва з таблиці locations)
+# Пристрої -> equipment (зіставлення за name; location — назва з таблиці locations)
 devices:
   - name: UPS-DC-01
     ip: 10.0.0.10

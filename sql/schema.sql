@@ -106,7 +106,8 @@ CREATE TABLE metric (
 -- ---------------------------------------------------------------------
 -- 3. Конфігурація SNMP-опитування (зв'язок із файлом config/snmp_config.yaml)
 -- ---------------------------------------------------------------------
--- Реєстр версій YAML-файлу: кожне успішне застосування файлу — новий рядок
+-- Реєстр версій YAML-файлу: застосування нового вмісту додає рядок, повернення до раніше
+-- застосованого — повторно активує наявний; активною може бути не більше однієї версії
 CREATE TABLE snmp_config (
     id             INTEGER      GENERATED ALWAYS AS IDENTITY,
     file_path      VARCHAR(255) NOT NULL,
@@ -144,7 +145,7 @@ CREATE TABLE snmp_credential (
     CONSTRAINT ck_snmp_credential_name   CHECK (name ~ '^[a-z0-9][a-z0-9-]*$'),
     CONSTRAINT ck_snmp_credential_secret CHECK (secret_ref ~ '^[A-Z][A-Z0-9_]*$'),
     CONSTRAINT ck_snmp_credential_v3     CHECK ((snmp_version = 'v3') = (username IS NOT NULL)
-                                                AND (username IS NULL OR btrim(username) <> '')),
+                                                AND (username IS NULL OR btrim(username, E' \t\r\n ') <> '')),
     CONSTRAINT ck_snmp_credential_auth   CHECK (snmp_version = 'v3' OR (auth_protocol IS NULL AND priv_protocol IS NULL)),
     CONSTRAINT ck_snmp_credential_priv   CHECK (priv_protocol IS NULL OR auth_protocol IS NOT NULL)
 );
@@ -308,7 +309,9 @@ CREATE TABLE incident (
                                       ON DELETE RESTRICT,
     -- інцидент типу 'threshold' завжди посилається на поріг, 'offline' — ніколи
     CONSTRAINT ck_incident_threshold  CHECK ((incident_type = 'threshold') = (threshold_id IS NOT NULL)),
-    CONSTRAINT ck_incident_value      CHECK (incident_type = 'offline' OR metric_value IS NOT NULL),
+    -- значення показника є лише в інцидента порушення порогу і має бути скінченним числом
+    CONSTRAINT ck_incident_value      CHECK ((incident_type = 'threshold') = (metric_value IS NOT NULL)
+                                             AND (metric_value IS NULL OR metric_value NOT IN ('NaN', 'Infinity', '-Infinity'))),
     -- узгодженість статусу з датами життєвого циклу (діаграма станів, ЛР4) — в обидва боки:
     -- дата етапу заповнена тоді й лише тоді, коли інцидент дійшов до цього етапу
     CONSTRAINT ck_incident_escalated  CHECK ((status = 'escalated' AND escalated_at IS NOT NULL)
@@ -319,10 +322,11 @@ CREATE TABLE incident (
     CONSTRAINT ck_incident_resolved   CHECK ((status IN ('resolved', 'closed')) = (resolved_at IS NOT NULL)),
     CONSTRAINT ck_incident_closed     CHECK ((status = 'closed') = (closed_at IS NOT NULL)
                                              AND (status = 'closed') = (close_comment IS NOT NULL)
-                                             AND (close_comment IS NULL OR btrim(close_comment) <> '')),
+                                             AND (close_comment IS NULL OR btrim(close_comment, E' \t\r\n ') <> '')),
     CONSTRAINT ck_incident_time_order CHECK (
         (escalated_at    IS NULL OR escalated_at    >= opened_at) AND
         (acknowledged_at IS NULL OR acknowledged_at >= opened_at) AND
+        (escalated_at    IS NULL OR acknowledged_at IS NULL OR escalated_at <= acknowledged_at) AND
         (resolved_at     IS NULL OR resolved_at     >= coalesce(acknowledged_at, opened_at)) AND
         (closed_at       IS NULL OR closed_at       >= coalesce(resolved_at, acknowledged_at, opened_at)))
 );
@@ -343,7 +347,8 @@ CREATE TABLE notification (
     CONSTRAINT fk_notification_user     FOREIGN KEY (user_id) REFERENCES users (id)
                                         ON DELETE RESTRICT,
     CONSTRAINT ck_notification_sent     CHECK ((status = 'sent') = (sent_at IS NOT NULL)),
-    CONSTRAINT ck_notification_failed   CHECK ((status = 'failed') = (error_message IS NOT NULL)),
+    CONSTRAINT ck_notification_failed   CHECK ((status = 'failed') = (error_message IS NOT NULL)
+                                              AND (error_message IS NULL OR btrim(error_message, E' \t\r\n ') <> '')),
     CONSTRAINT ck_notification_time     CHECK (sent_at IS NULL OR sent_at >= created_at)
 );
 

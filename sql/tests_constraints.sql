@@ -6,7 +6,7 @@
 --
 --  1) Позитивна частина: вставляє узгоджений набір даних і проводить
 --     інцидент усім життєвим циклом — кожна інструкція має виконатися.
---  2) Негативна частина: 47 некоректних операцій. Кожна має бути відхилена
+--  2) Негативна частина: 51 некоректна операція. Кожна має бути відхилена
 --     саме тим обмеженням, для якого її складено (PASS), інакше — FAIL.
 --  Усе виконується в одній транзакції, яка наприкінці відкочується:
 --  тест не залишає даних у БД. Якщо хоч одна перевірка FAIL — psql
@@ -149,7 +149,7 @@ SELECT tableoid::regclass AS partition, count(*) AS rows
 FROM metric_reading WHERE equipment_id IN (:eq_ups, :eq_sw) GROUP BY 1 ORDER BY 1;
 
 -- ---------------------------------------------------------------------
--- 2. Негативна частина: 47 некоректних операцій
+-- 2. Негативна частина: 51 некоректна операція
 -- ---------------------------------------------------------------------
 -- користувачі
 SELECT pg_temp.expect_error(1, 'Логін із пробілом і великими літерами',
@@ -282,7 +282,7 @@ SELECT pg_temp.expect_error(40, 'Видалення версії конфігу�
     format($q$DELETE FROM snmp_config WHERE id = %s$q$, :cfg),
     '^fk_(snmp_credential|oid_map|equipment)_config$') \gset
 
--- узгодженість, посилена за результатами тестування (№ 41–47)
+-- узгодженість, посилена за результатами тестування (№ 41–51)
 SELECT pg_temp.expect_error(41, 'E-mail із великими літерами (обхід унікальності за регістром)',
     format($q$INSERT INTO users (role_id, full_name, login, password_hash, email) VALUES (%s, 'X', 't.upper', 'h', 'T.Admin@ISP.example')$q$, :role_support),
     '^ck_users_email$') \gset
@@ -304,6 +304,18 @@ SELECT pg_temp.expect_error(46, 'SNMP v3 з порожнім іменем кор
 SELECT pg_temp.expect_error(47, 'Сповіщення в черзі з часом відправлення',
     format($q$INSERT INTO notification (incident_id, user_id, channel, status, sent_at) VALUES (%s, %s, 'web', 'queued', now())$q$, :inc_ups, :user_eng),
     '^ck_notification_sent$') \gset
+SELECT pg_temp.expect_error(48, 'Ескалація пізніше за підтвердження',
+    format($q$UPDATE incident SET status = 'acknowledged', escalated_at = opened_at + INTERVAL '30 minutes', acknowledged_at = opened_at + INTERVAL '1 minute', acknowledged_by = %s WHERE id = %s$q$, :user_eng, :inc_sw),
+    '^ck_incident_time_order$') \gset
+SELECT pg_temp.expect_error(49, 'Коментар закриття лише з табуляції та переведення рядка',
+    format($q$UPDATE incident SET status = 'closed', acknowledged_at = now(), acknowledged_by = %s, resolved_at = now(), closed_at = now(), close_comment = E'\t\n' WHERE id = %s$q$, :user_eng, :inc_sw),
+    '^ck_incident_closed$') \gset
+SELECT pg_temp.expect_error(50, 'Невдале сповіщення з порожнім текстом помилки',
+    format($q$INSERT INTO notification (incident_id, user_id, channel, status, error_message) VALUES (%s, %s, 'email', 'failed', '   ')$q$, :inc_ups, :user_eng),
+    '^ck_notification_failed$') \gset
+SELECT pg_temp.expect_error(51, 'Значення NaN в інциденті порушення порогу',
+    format($q$INSERT INTO incident (equipment_id, incident_type, threshold_id, metric_value) VALUES (%s, 'threshold', %s, 'NaN')$q$, :eq_ups, :thr_charge),
+    '^ck_incident_value$') \gset
 
 -- ---------------------------------------------------------------------
 -- 3. Результати
@@ -318,10 +330,10 @@ FROM test_result;
 
 DO $chk$
 BEGIN
-    IF (SELECT count(*) FROM test_result) <> 47 OR EXISTS (SELECT 1 FROM test_result WHERE result <> 'PASS') THEN
+    IF (SELECT count(*) FROM test_result) <> 51 OR EXISTS (SELECT 1 FROM test_result WHERE result <> 'PASS') THEN
         RAISE EXCEPTION 'Є непройдені перевірки — див. таблицю вище';
     END IF;
 END $chk$;
 
 ROLLBACK;
-\echo 'Усі 47 перевірок пройдено; транзакцію відкочено, тестові дані не збережено.'
+\echo 'Усі 51 перевірку пройдено; транзакцію відкочено, тестові дані не збережено.'
