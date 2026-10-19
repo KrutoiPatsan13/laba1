@@ -6,7 +6,7 @@
 --
 --  1) Позитивна частина: вставляє узгоджений набір даних і проводить
 --     інцидент усім життєвим циклом — кожна інструкція має виконатися.
---  2) Негативна частина: 40 некоректних операцій. Кожна має бути відхилена
+--  2) Негативна частина: 47 некоректних операцій. Кожна має бути відхилена
 --     саме тим обмеженням, для якого її складено (PASS), інакше — FAIL.
 --  Усе виконується в одній транзакції, яка наприкінці відкочується:
 --  тест не залишає даних у БД. Якщо хоч одна перевірка FAIL — psql
@@ -128,6 +128,11 @@ INSERT INTO equipment (type_id, location_id, name, ip_address, credential_id) VA
 INSERT INTO metric_reading SELECT id, :m_temp, now(), 1 FROM equipment WHERE name = 't-tmp';
 DELETE FROM equipment WHERE name = 't-tmp';
 
+-- IP виведеного з експлуатації пристрою можна віддати новому (унікальність лише серед активних)
+INSERT INTO equipment (type_id, location_id, name, ip_address, credential_id, is_active)
+VALUES (:type_sw, :loc_node, 't-old', '192.0.2.50', :cred_net, FALSE);
+INSERT INTO equipment (type_id, location_id, name, ip_address, credential_id) VALUES (:type_sw, :loc_node, 't-new', '192.0.2.50', :cred_net);
+
 -- (усередині DO psql-змінні не підставляються, тому — підзапити за назвами)
 DO $chk$
 BEGIN
@@ -136,6 +141,7 @@ BEGIN
     ASSERT (SELECT count(*) FROM metric_reading r JOIN equipment e ON e.id = r.equipment_id
             WHERE e.name IN ('t-ups', 't-switch')) = 4, 'має бути 4 тестові показники';
     ASSERT NOT EXISTS (SELECT 1 FROM equipment WHERE name = 't-tmp'), 't-tmp має бути видалено';
+    ASSERT (SELECT count(*) FROM equipment WHERE ip_address = '192.0.2.50') = 2, 'IP неактивного пристрою має бути доступним';
 END $chk$;
 
 \echo '--- Розподіл тестових показників за секціями ---'
@@ -143,7 +149,7 @@ SELECT tableoid::regclass AS partition, count(*) AS rows
 FROM metric_reading WHERE equipment_id IN (:eq_ups, :eq_sw) GROUP BY 1 ORDER BY 1;
 
 -- ---------------------------------------------------------------------
--- 2. Негативна частина: 40 некоректних операцій
+-- 2. Негативна частина: 47 некоректних операцій
 -- ---------------------------------------------------------------------
 -- користувачі
 SELECT pg_temp.expect_error(1, 'Логін із пробілом і великими літерами',
@@ -276,6 +282,29 @@ SELECT pg_temp.expect_error(40, 'Видалення версії конфігу�
     format($q$DELETE FROM snmp_config WHERE id = %s$q$, :cfg),
     '^fk_(snmp_credential|oid_map|equipment)_config$') \gset
 
+-- узгодженість, посилена за результатами тестування (№ 41–47)
+SELECT pg_temp.expect_error(41, 'E-mail із великими літерами (обхід унікальності за регістром)',
+    format($q$INSERT INTO users (role_id, full_name, login, password_hash, email) VALUES (%s, 'X', 't.upper', 'h', 'T.Admin@ISP.example')$q$, :role_support),
+    '^ck_users_email$') \gset
+SELECT pg_temp.expect_error(42, 'IPv4-mapped IPv6 — дубль наявної IPv4-адреси',
+    format($q$INSERT INTO equipment (type_id, location_id, name, ip_address, credential_id) VALUES (%s, %s, 't-mapped', '::ffff:192.0.2.10', %s)$q$, :type_sw, :loc_dc, :cred_net),
+    '^ck_equipment_ip_host$') \gset
+SELECT pg_temp.expect_error(43, 'Новий інцидент із заповненим підтвердженням',
+    format($q$INSERT INTO incident (equipment_id, incident_type, threshold_id, metric_value, acknowledged_at, acknowledged_by) VALUES (%s, 'threshold', %s, 20, now(), %s)$q$, :eq_ups, :thr_charge, :user_eng),
+    '^ck_incident_ack$') \gset
+SELECT pg_temp.expect_error(44, 'Новий інцидент із датою закриття',
+    format($q$INSERT INTO incident (equipment_id, incident_type, threshold_id, metric_value, closed_at) VALUES (%s, 'threshold', %s, 20, now() - INTERVAL '1 day')$q$, :eq_ups, :thr_charge),
+    '^ck_incident_closed$') \gset
+SELECT pg_temp.expect_error(45, 'Підтвердження раніше за відкриття інциденту',
+    format($q$UPDATE incident SET status = 'acknowledged', acknowledged_by = %s, acknowledged_at = opened_at - INTERVAL '1 hour' WHERE id = %s$q$, :user_eng, :inc_sw),
+    '^ck_incident_time_order$') \gset
+SELECT pg_temp.expect_error(46, 'SNMP v3 з порожнім іменем користувача',
+    format($q$INSERT INTO snmp_credential (config_id, name, snmp_version, username, secret_ref) VALUES (%s, 't-empty-user', 'v3', '  ', 'SNMP_X')$q$, :cfg),
+    '^ck_snmp_credential_v3$') \gset
+SELECT pg_temp.expect_error(47, 'Сповіщення в черзі з часом відправлення',
+    format($q$INSERT INTO notification (incident_id, user_id, channel, status, sent_at) VALUES (%s, %s, 'web', 'queued', now())$q$, :inc_ups, :user_eng),
+    '^ck_notification_sent$') \gset
+
 -- ---------------------------------------------------------------------
 -- 3. Результати
 -- ---------------------------------------------------------------------
@@ -289,10 +318,10 @@ FROM test_result;
 
 DO $chk$
 BEGIN
-    IF (SELECT count(*) FROM test_result) <> 40 OR EXISTS (SELECT 1 FROM test_result WHERE result <> 'PASS') THEN
+    IF (SELECT count(*) FROM test_result) <> 47 OR EXISTS (SELECT 1 FROM test_result WHERE result <> 'PASS') THEN
         RAISE EXCEPTION 'Є непройдені перевірки — див. таблицю вище';
     END IF;
 END $chk$;
 
 ROLLBACK;
-\echo 'Усі 40 перевірок пройдено; транзакцію відкочено, тестові дані не збережено.'
+\echo 'Усі 47 перевірок пройдено; транзакцію відкочено, тестові дані не збережено.'

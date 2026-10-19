@@ -9,6 +9,9 @@
 --  Запуск:  psql -d netguard -v ON_ERROR_STOP=1 -f sql/schema.sql
 -- =====================================================================
 
+-- межі місячних секцій metric_reading рахуються в UTC незалежно від налаштувань клієнта
+SET TIME ZONE 'UTC';
+
 DROP SCHEMA IF EXISTS netguard CASCADE;
 CREATE SCHEMA netguard;
 SET search_path TO netguard;
@@ -60,7 +63,9 @@ CREATE TABLE users (
     CONSTRAINT uq_users_email    UNIQUE (email),
     CONSTRAINT uq_users_telegram UNIQUE (telegram_chat_id),
     CONSTRAINT ck_users_login    CHECK (login ~ '^[a-z0-9_.]{3,50}$'),
-    CONSTRAINT ck_users_email    CHECK (email IS NULL OR email ~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$')
+    -- e-mail зберігається в нижньому регістрі, тому uq_users_email не залежить від регістру
+    CONSTRAINT ck_users_email    CHECK (email IS NULL OR (email = lower(email)
+                                         AND email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'))
 );
 
 CREATE TABLE locations (
@@ -138,7 +143,8 @@ CREATE TABLE snmp_credential (
     CONSTRAINT uq_snmp_credential_name   UNIQUE (name),
     CONSTRAINT ck_snmp_credential_name   CHECK (name ~ '^[a-z0-9][a-z0-9-]*$'),
     CONSTRAINT ck_snmp_credential_secret CHECK (secret_ref ~ '^[A-Z][A-Z0-9_]*$'),
-    CONSTRAINT ck_snmp_credential_v3     CHECK ((snmp_version = 'v3') = (username IS NOT NULL)),
+    CONSTRAINT ck_snmp_credential_v3     CHECK ((snmp_version = 'v3') = (username IS NOT NULL)
+                                                AND (username IS NULL OR btrim(username) <> '')),
     CONSTRAINT ck_snmp_credential_auth   CHECK (snmp_version = 'v3' OR (auth_protocol IS NULL AND priv_protocol IS NULL)),
     CONSTRAINT ck_snmp_credential_priv   CHECK (priv_protocol IS NULL OR auth_protocol IS NOT NULL)
 );
@@ -193,8 +199,9 @@ CREATE TABLE equipment (
                                      ON DELETE RESTRICT,
     CONSTRAINT uq_equipment_name     UNIQUE (name),
     CONSTRAINT uq_equipment_serial   UNIQUE (serial_number),
-    CONSTRAINT uq_equipment_ip       UNIQUE (ip_address),
-    CONSTRAINT ck_equipment_ip_host  CHECK (masklen(ip_address) = CASE family(ip_address) WHEN 4 THEN 32 ELSE 128 END),
+    -- адреса вузла (не мережі); IPv4-mapped IPv6 (::ffff:a.b.c.d) заборонено — це дубль IPv4-адреси
+    CONSTRAINT ck_equipment_ip_host  CHECK (masklen(ip_address) = CASE family(ip_address) WHEN 4 THEN 32 ELSE 128 END
+                                            AND NOT (family(ip_address) = 6 AND ip_address <<= inet '::ffff:0.0.0.0/96')),
     CONSTRAINT ck_equipment_port     CHECK (snmp_port BETWEEN 1 AND 65535),
     CONSTRAINT ck_equipment_interval CHECK (poll_interval_s BETWEEN 10 AND 60),
     CONSTRAINT ck_equipment_failed   CHECK (failed_polls >= 0)
@@ -302,19 +309,22 @@ CREATE TABLE incident (
     -- інцидент типу 'threshold' завжди посилається на поріг, 'offline' — ніколи
     CONSTRAINT ck_incident_threshold  CHECK ((incident_type = 'threshold') = (threshold_id IS NOT NULL)),
     CONSTRAINT ck_incident_value      CHECK (incident_type = 'offline' OR metric_value IS NOT NULL),
-    -- узгодженість статусу з датами життєвого циклу (діаграма станів, ЛР4)
-    CONSTRAINT ck_incident_escalated  CHECK (status <> 'escalated' OR escalated_at IS NOT NULL),
-    CONSTRAINT ck_incident_ack        CHECK (status IN ('new', 'escalated')
-                                             OR (acknowledged_at IS NOT NULL AND acknowledged_by IS NOT NULL)),
-    CONSTRAINT ck_incident_resolved   CHECK (status NOT IN ('resolved', 'closed') OR resolved_at IS NOT NULL),
-    CONSTRAINT ck_incident_closed     CHECK (status <> 'closed'
-                                             OR (closed_at IS NOT NULL AND close_comment IS NOT NULL
-                                                 AND btrim(close_comment) <> '')),
+    -- узгодженість статусу з датами життєвого циклу (діаграма станів, ЛР4) — в обидва боки:
+    -- дата етапу заповнена тоді й лише тоді, коли інцидент дійшов до цього етапу
+    CONSTRAINT ck_incident_escalated  CHECK ((status = 'escalated' AND escalated_at IS NOT NULL)
+                                             OR (status = 'new' AND escalated_at IS NULL)
+                                             OR status NOT IN ('new', 'escalated')),
+    CONSTRAINT ck_incident_ack        CHECK ((status IN ('new', 'escalated')) = (acknowledged_at IS NULL)
+                                             AND (acknowledged_at IS NULL) = (acknowledged_by IS NULL)),
+    CONSTRAINT ck_incident_resolved   CHECK ((status IN ('resolved', 'closed')) = (resolved_at IS NOT NULL)),
+    CONSTRAINT ck_incident_closed     CHECK ((status = 'closed') = (closed_at IS NOT NULL)
+                                             AND (status = 'closed') = (close_comment IS NOT NULL)
+                                             AND (close_comment IS NULL OR btrim(close_comment) <> '')),
     CONSTRAINT ck_incident_time_order CHECK (
         (escalated_at    IS NULL OR escalated_at    >= opened_at) AND
         (acknowledged_at IS NULL OR acknowledged_at >= opened_at) AND
-        (resolved_at     IS NULL OR resolved_at     >= acknowledged_at) AND
-        (closed_at       IS NULL OR closed_at       >= resolved_at))
+        (resolved_at     IS NULL OR resolved_at     >= coalesce(acknowledged_at, opened_at)) AND
+        (closed_at       IS NULL OR closed_at       >= coalesce(resolved_at, acknowledged_at, opened_at)))
 );
 
 CREATE TABLE notification (
@@ -332,8 +342,8 @@ CREATE TABLE notification (
                                         ON DELETE CASCADE,
     CONSTRAINT fk_notification_user     FOREIGN KEY (user_id) REFERENCES users (id)
                                         ON DELETE RESTRICT,
-    CONSTRAINT ck_notification_sent     CHECK (status <> 'sent' OR sent_at IS NOT NULL),
-    CONSTRAINT ck_notification_failed   CHECK (status <> 'failed' OR error_message IS NOT NULL),
+    CONSTRAINT ck_notification_sent     CHECK ((status = 'sent') = (sent_at IS NOT NULL)),
+    CONSTRAINT ck_notification_failed   CHECK ((status = 'failed') = (error_message IS NOT NULL)),
     CONSTRAINT ck_notification_time     CHECK (sent_at IS NULL OR sent_at >= created_at)
 );
 
@@ -358,11 +368,17 @@ CREATE TABLE event_log (
 
 -- ---------------------------------------------------------------------
 -- 8. Індекси (PostgreSQL не створює індекси для зовнішніх ключів автоматично)
+-- Свідомий виняток: metric_reading.metric_id (fk_reading_metric) окремого індексу не має —
+-- довідник metric практично не змінюється, а індекс (metric_id, read_at) на найбільшій таблиці
+-- додав би ≈ 30 Б на рядок (≈ 30 % її обсягу); metric_id входить до pk_metric_reading другим стовпцем.
 -- ---------------------------------------------------------------------
 CREATE INDEX ix_users_role             ON users (role_id);
 CREATE INDEX ix_equipment_type         ON equipment (type_id);
 CREATE INDEX ix_equipment_location     ON equipment (location_id);
 CREATE INDEX ix_equipment_status       ON equipment (status) WHERE is_active;
+-- IP-адреса унікальна серед активних пристроїв: виведений з експлуатації пристрій
+-- зберігає свою історію, але не блокує повторне використання адреси новим пристроєм
+CREATE UNIQUE INDEX uq_equipment_ip    ON equipment (ip_address) WHERE is_active;
 CREATE INDEX ix_equipment_credential   ON equipment (credential_id);
 CREATE INDEX ix_equipment_config       ON equipment (config_id) WHERE config_id IS NOT NULL;
 CREATE INDEX ix_snmp_credential_config ON snmp_credential (config_id);
