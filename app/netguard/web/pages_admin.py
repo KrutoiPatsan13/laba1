@@ -1,13 +1,15 @@
-"""Сторінки адміністратора: порогові значення (FR-06), користувачі (FR-11), YAML-конфігурація SNMP."""
+"""Сторінки адміністратора: порогові значення (FR-06), користувачі (FR-11), YAML-конфігурація SNMP.
+
+Дані й зміни — через API Gateway, який у кожному запиті ще раз перевіряє роль адміністратора.
+"""
 import json
+from urllib.parse import quote
 
 import yaml
 from nicegui import ui
-from psycopg.types.json import Jsonb
 
-from ..db import error_text
-from ..snmp_yaml import ConfigError, load, to_json
-from .common import CATEGORY, ROLE, admin_only, badge, badge_slot, db, fmt_dt, fmt_num, frame, uid
+from . import api
+from .common import CATEGORY, ROLE, admin_only, badge, badge_slot, fmt_dt, fmt_num, frame, uid
 
 SEV = {"warning": ("Попередження", "warning"), "critical": ("Критично", "negative")}
 
@@ -18,25 +20,28 @@ async def thresholds_page():
     await frame("Порогові значення", "Межі норми метрик для типів обладнання; зміни фіксуються в журналі подій")
     if not admin_only():
         return
-    types = {r["id"]: f"{r['name']} ({CATEGORY[r['category']]})"
-             for r in await db.all("SELECT id, name, category FROM equipment_type WHERE name NOT LIKE '~%%' ORDER BY name")}
-    metrics = {r["id"]: f"{r['name']}, {r['unit']}" for r in await db.all("SELECT id, name, unit FROM metric ORDER BY id")}
+    try:
+        ref = await api.get("/api/thresholds/reference")
+    except api.ApiError as e:
+        ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+        return
+    types = {r["id"]: f"{r['name']} ({CATEGORY[r['category']]})" for r in ref["types"]}
+    metrics = {r["id"]: f"{r['name']}, {r['unit']}" for r in ref["metrics"]}
 
     @ui.refreshable
     async def table():
-        rows = await db.all(
-            "SELECT t.*, et.name AS type_name, m.name AS metric_name, m.unit,"
-            " (SELECT count(*) FROM incident i WHERE i.threshold_id = t.id) AS incidents"
-            " FROM threshold t JOIN equipment_type et ON et.id = t.equipment_type_id JOIN metric m ON m.id = t.metric_id"
-            " ORDER BY et.name, m.id, t.severity")
+        try:
+            rows = await api.get("/api/thresholds")
+        except api.ApiError as e:
+            ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+            return
         data = [{"id": r["id"], "type": r["type_name"], "metric": f"{r['metric_name']}, {r['unit']}",
                  "severity_label": SEV[r["severity"]][0], "severity_color": SEV[r["severity"]][1],
                  "min": fmt_num(r["min_value"]), "max": fmt_num(r["max_value"]),
                  "active": "так" if r["is_active"] else "ні", "incidents": r["incidents"],
-                 "updated": fmt_dt(r["updated_at"]), "raw": {k: r[k] for k in ("equipment_type_id", "metric_id",
-                                                                              "severity", "is_active")} |
-                 {"min_value": float(r["min_value"]) if r["min_value"] is not None else None,
-                  "max_value": float(r["max_value"]) if r["max_value"] is not None else None}} for r in rows]
+                 "updated": fmt_dt(r["updated_at"]),
+                 "raw": {k: r[k] for k in ("equipment_type_id", "metric_id", "severity", "is_active", "min_value",
+                                           "max_value")}} for r in rows]
         t = ui.table(columns=[{"name": "type", "label": "Тип обладнання", "field": "type", "align": "left"},
                               {"name": "metric", "label": "Метрика", "field": "metric", "align": "left"},
                               {"name": "severity", "label": "Рівень", "field": "severity_label", "align": "left"},
@@ -64,18 +69,15 @@ async def thresholds_page():
             active = ui.switch("Поріг діє", value=raw.get("is_active", True))
 
             async def save():
-                p = {"t": t_sel.value, "m": m_sel.value, "s": sev.value, "lo": lo.value, "hi": hi.value,
-                     "a": active.value, "id": row["id"] if row else None}
+                body = {"equipment_type_id": t_sel.value, "metric_id": m_sel.value, "severity": sev.value,
+                        "min_value": lo.value, "max_value": hi.value, "is_active": active.value}
                 try:
                     if row:
-                        await db.run("UPDATE threshold SET equipment_type_id = %(t)s, metric_id = %(m)s, severity = %(s)s,"
-                                     " min_value = %(lo)s, max_value = %(hi)s, is_active = %(a)s WHERE id = %(id)s",
-                                     p, user_id=uid())
+                        await api.put(f"/api/thresholds/{row['id']}", body)
                     else:
-                        await db.run("INSERT INTO threshold (equipment_type_id, metric_id, severity, min_value, max_value,"
-                                     " is_active) VALUES (%(t)s, %(m)s, %(s)s, %(lo)s, %(hi)s, %(a)s)", p, user_id=uid())
-                except Exception as e:
-                    ui.notify(f"Не збережено: {error_text(e)}", type="negative", multi_line=True)
+                        await api.post("/api/thresholds", body)
+                except api.ApiError as e:
+                    ui.notify(f"Не збережено: {e.message}", type="negative", multi_line=True)
                     return
                 ui.notify("Поріг збережено; зміну записано в журнал подій", type="positive")
                 dlg.close()
@@ -83,9 +85,9 @@ async def thresholds_page():
 
             async def delete():
                 try:
-                    await db.run("DELETE FROM threshold WHERE id = %s", (row["id"],), user_id=uid())
-                except Exception as e:
-                    ui.notify(f"Поріг не видалено: {error_text(e)}. Деактивуйте його замість видалення.",
+                    await api.delete(f"/api/thresholds/{row['id']}")
+                except api.ApiError as e:
+                    ui.notify(f"Поріг не видалено: {e.message}. Деактивуйте його замість видалення.",
                               type="negative", multi_line=True)
                     return
                 ui.notify("Поріг видалено", type="positive")
@@ -116,11 +118,19 @@ async def users_page():
     await frame("Користувачі", "Облікові записи інженерів техпідтримки й адміністраторів; паролі зберігаються як bcrypt-хеші")
     if not admin_only():
         return
-    roles = {r["id"]: r["name"] for r in await db.all("SELECT id, name FROM roles ORDER BY id")}
+    try:
+        roles = {r["id"]: r["name"] for r in await api.get("/api/users/roles")}
+    except api.ApiError as e:
+        ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+        return
 
     @ui.refreshable
     async def table():
-        rows = await db.all("SELECT u.*, r.code AS role_code FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.full_name")
+        try:
+            rows = await api.get("/api/users")      # без хешів паролів
+        except api.ApiError as e:
+            ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+            return
         data = [{"id": r["id"], "login": r["login"], "name": r["full_name"], "role": ROLE[r["role_code"]],
                  "email": r["email"] or "—", "telegram": str(r["telegram_chat_id"] or "—"),
                  "active_label": "активний" if r["is_active"] else "заблоковано",
@@ -157,28 +167,23 @@ async def users_page():
             active = ui.switch("Обліковий запис активний", value=raw.get("is_active", True))
 
             async def save():
-                if not row and len(pwd.value or "") < 8:
+                if (not row or pwd.value) and len(pwd.value or "") < 8:
                     ui.notify("Пароль має містити щонайменше 8 символів", type="warning")
                     return
                 if row and row["id"] == uid() and not active.value:
                     ui.notify("Не можна заблокувати власний обліковий запис", type="warning")
                     return
-                p = {"name": name.value.strip(), "login": login.value.strip().lower(), "role": role.value,
-                     "email": (email.value or "").strip().lower() or None,
-                     "tg": int(tg.value) if (tg.value or "").strip().lstrip("-").isdigit() else None,
-                     "a": active.value, "pwd": pwd.value or None, "id": row["id"] if row else None}
+                body = {"full_name": name.value.strip(), "login": login.value.strip().lower(), "role_id": role.value,
+                        "email": (email.value or "").strip().lower() or None,
+                        "telegram_chat_id": int(tg.value) if (tg.value or "").strip().lstrip("-").isdigit() else None,
+                        "is_active": active.value, "password": pwd.value or None}
                 try:
                     if row:
-                        await db.run("UPDATE users SET full_name = %(name)s, login = %(login)s, role_id = %(role)s,"
-                                     " email = %(email)s, telegram_chat_id = %(tg)s, is_active = %(a)s,"
-                                     " password_hash = coalesce(fn_hash_password(%(pwd)s), password_hash) WHERE id = %(id)s",
-                                     p, user_id=uid())
+                        await api.put(f"/api/users/{row['id']}", body)
                     else:
-                        await db.run("INSERT INTO users (full_name, login, role_id, email, telegram_chat_id, is_active,"
-                                     " password_hash) VALUES (%(name)s, %(login)s, %(role)s, %(email)s, %(tg)s, %(a)s,"
-                                     " fn_hash_password(%(pwd)s))", p, user_id=uid())
-                except Exception as e:
-                    ui.notify(f"Не збережено: {error_text(e)}", type="negative", multi_line=True)
+                        await api.post("/api/users", body)
+                except api.ApiError as e:
+                    ui.notify(f"Не збережено: {e.message}", type="negative", multi_line=True)
                     return
                 ui.notify("Збережено", type="positive")
                 dlg.close()
@@ -206,17 +211,14 @@ async def snmp_page():
     if not admin_only():
         return
 
-    async def apply(cfg: dict, sha: str, path: str):
-        try:
-            res = await db.one("SELECT sp_apply_snmp_config(%s, %s, %s, %s) AS r",
-                               (path, sha, Jsonb(cfg), uid()), user_id=uid())
-        except Exception as e:
-            ui.notify(f"Конфігурацію не застосовано, активною лишилася попередня версія: {error_text(e)}",
-                      type="negative", multi_line=True, timeout=12000)
-            return
+    def rejected(e: api.ApiError):
+        ui.notify(f"Конфігурацію не застосовано, активною лишилася попередня версія: {e.message}",
+                  type="negative", multi_line=True, timeout=12000)
+
+    async def applied(res: dict):
         msg = {"skipped": "Ця версія вже активна — змін немає", "reactivated": "Раніше застосовану версію активовано знову",
-               "applied": "Нову версію конфігурації застосовано"}[res["r"]]
-        ui.notify(msg, type="positive" if res["r"] != "skipped" else "info")
+               "applied": "Нову версію конфігурації застосовано"}[res["result"]]
+        ui.notify(msg, type="positive" if res["result"] != "skipped" else "info")
         await versions.refresh()
         await active_summary.refresh()
 
@@ -225,14 +227,25 @@ async def snmp_page():
         if not name.lower().endswith((".yaml", ".yml")):
             ui.notify("Потрібен файл .yaml або .yml", type="warning")
             return
-        raw = await e.file.read()
         try:
-            cfg, sha = load(raw)
-        except ConfigError as err:
-            ui.notify(f"Помилка у файлі {name}: {err}", type="negative", multi_line=True, timeout=15000)
-            return
-        await apply(cfg, sha, f"/etc/netguard/{name}")
+            # файл перевіряє API Gateway (netguard.snmp_yaml), застосовує функція БД sp_apply_snmp_config
+            res = await api.upload("/api/snmp/versions", await e.file.read(), quote(name))
+        except api.ApiError as err:
+            if "sqlstate" not in err.payload:       # помилка у файлі: причину з номером рядка формує API Gateway
+                ui.notify(err.message, type="negative", multi_line=True, timeout=15000)
+                return
+            rejected(err)
+        else:
+            await applied(res)
         uploader.reset()
+
+    async def restore(v: dict):
+        try:
+            res = await api.post(f"/api/snmp/versions/{v['id']}/activate")
+        except api.ApiError as e:
+            rejected(e)
+            return
+        await applied(res)
 
     def show(v: dict):
         with ui.dialog() as dlg, ui.card().classes("w-[760px] max-w-full p-6 gap-2"):
@@ -244,7 +257,11 @@ async def snmp_page():
         dlg.open()
 
     async def compare(v: dict):
-        cur = await db.one("SELECT content FROM snmp_config WHERE is_active")
+        try:
+            cur = (await api.get("/api/snmp/active"))["config"]
+        except api.ApiError as e:
+            ui.notify(e.message, type="negative")
+            return
         diff = config_diff(cur["content"] if cur else {}, v["content"])
         with ui.dialog() as dlg, ui.card().classes("w-[680px] max-w-full p-6 gap-2"):
             ui.label(f"Версія №{v['id']} порівняно з активною").classes("text-lg font-semibold")
@@ -257,10 +274,11 @@ async def snmp_page():
 
     @ui.refreshable
     async def versions():
-        rows = await db.all(
-            "SELECT c.*, u.full_name, (SELECT count(*) FROM equipment e WHERE e.config_id = c.id) AS devices,"
-            " jsonb_array_length(c.content -> 'devices') AS in_file FROM snmp_config c"
-            " LEFT JOIN users u ON u.id = c.loaded_by ORDER BY c.id DESC")
+        try:
+            rows = await api.get("/api/snmp/versions")
+        except api.ApiError as e:
+            ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+            return
         for v in rows:
             with ui.card().classes("w-full p-4"):
                 with ui.row().classes("items-center w-full gap-4"):
@@ -273,8 +291,7 @@ async def snmp_page():
                     ui.button("Переглянути", icon="visibility", on_click=lambda v=v: show(v)).props("flat dense")
                     if not v["is_active"]:
                         ui.button("Порівняти", icon="compare_arrows", on_click=lambda v=v: compare(v)).props("flat dense")
-                        ui.button("Повернути", icon="restore",
-                                  on_click=lambda v=v: apply(v["content"], v["sha256"], v["file_path"])) \
+                        ui.button("Повернути", icon="restore", on_click=lambda v=v: restore(v)) \
                             .props("outline dense color=secondary").tooltip("Зробити цю версію знову активною")
                 with ui.row().classes("gap-6 text-sm"):
                     ui.label(f"Файл: {v['file_path']}")
@@ -285,12 +302,12 @@ async def snmp_page():
 
     @ui.refreshable
     async def active_summary():
-        creds = await db.all("SELECT name, snmp_version, username, auth_protocol, priv_protocol, secret_ref,"
-                             " (SELECT count(*) FROM equipment e WHERE e.credential_id = c.id AND e.is_active) AS devices"
-                             " FROM snmp_credential c ORDER BY name")
-        plan = await db.all("SELECT t.snmp_profile, t.name, m.code, om.oid, om.scale FROM snmp_oid_map om"
-                            " JOIN equipment_type t ON t.id = om.equipment_type_id JOIN metric m ON m.id = om.metric_id"
-                            " ORDER BY t.snmp_profile, m.id")
+        try:
+            act = await api.get("/api/snmp/active")
+        except api.ApiError as e:
+            ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+            return
+        creds, plan = act["credentials"], act["plan"]
         with ui.row().classes("w-full gap-4 items-start"):
             with ui.card().classes("flex-[1.2] min-w-[440px] p-4"):
                 ui.label("Облікові дані SNMP (секретів у БД немає)").classes("font-semibold")
@@ -346,6 +363,3 @@ def config_diff(old: dict, new: dict) -> list[str]:
     if old.get("defaults") != new.get("defaults"):
         out.append(f"~ defaults: {old.get('defaults')} → {new.get('defaults')}")
     return out
-
-
-__all__ = ["thresholds_page", "users_page", "snmp_page", "to_json"]
