@@ -81,11 +81,20 @@ Python, що з нею працює: сервіси опитування, ана
 
 ### Запуск
 
+Потрібен PostgreSQL 15+. Якщо його немає (наприклад, у GitHub Codespaces), найпростіше підняти
+його в Docker — схему, логіку й демо-дані потім створить `demo_setup`:
+
+```bash
+docker run -d --name netguard-db -e POSTGRES_USER=netguard -e POSTGRES_PASSWORD=netguard \
+  -e POSTGRES_DB=netguard -p 127.0.0.1:5432:5432 postgres:16
+# після перезапуску середовища: docker start netguard-db
+```
+
 ```bash
 cd app
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-export NETGUARD_DSN="host=localhost dbname=netguard user=postgres"   # власник схеми netguard
+export NETGUARD_DSN="host=localhost dbname=netguard user=netguard password=netguard"   # власник схеми netguard
 # секрети (щонайменше 32 символи); якщо не задати, python -m netguard згенерує випадкові на час роботи
 export NETGUARD_STORAGE_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"   # сеанси Web UI
 export NETGUARD_JWT_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"       # токени JWT
@@ -94,6 +103,10 @@ export NETGUARD_SNMP_CONFIG=../config/snmp_config.demo.yaml   # необов'я�
 NETGUARD_SIM_FAULTS="SW-LUK-02=offline;UPS-TER-01=battery_low" python -m netguard
 # веб-інтерфейс: http://localhost:8080
 ```
+
+Якщо PostgreSQL недоступна, сервіси чекають на неї до 30 с (`NETGUARD_DB_WAIT_S`), а потім
+завершуються з підказкою, як її запустити. Змінну `NETGUARD_DSN` потрібно задати в кожному
+терміналі, з якого запускаються `demo_setup` і `python -m netguard`.
 
 Демонстраційні облікові записи: `admin` / `Admin#2026` (адміністратор),
 `a.koval` / `Support#2026` (сапорт). Інші змінні середовища описано в `app/netguard/settings.py`;

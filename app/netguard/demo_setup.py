@@ -19,6 +19,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from .db import open_connection
 from .services.emulator import UPTIME_ANCHOR, baseline
 from .settings import REPO_DIR, settings
 from .snmp_yaml import load, to_json
@@ -173,7 +174,7 @@ def main(argv=None):
 
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     now -= timedelta(minutes=now.minute % 5)
-    conn = psycopg.connect(settings.dsn, row_factory=dict_row, autocommit=True)
+    conn = open_connection()
     if args.reset:
         for f in ("schema.sql", "lr2_logic.sql", "seed_reference.sql"):
             print(f"→ sql/{f}")

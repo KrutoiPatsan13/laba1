@@ -16,6 +16,8 @@ import subprocess
 import sys
 import time
 
+from .db import open_connection
+
 SERVICES = {
     "poller": "netguard.services.poller",
     "alerting": "netguard.services.alerting",
@@ -31,6 +33,8 @@ def main():
     unknown = set(names) - set(SERVICES)
     if unknown:
         sys.exit(f"невідомі сервіси: {', '.join(sorted(unknown))}; доступні: {', '.join(SERVICES)}")
+    if set(names) - {"web"}:
+        open_connection().close()       # БД недоступна — одне зрозуміле повідомлення замість помилок кожного сервісу
     for var in ("NETGUARD_JWT_SECRET", "NETGUARD_STORAGE_SECRET"):
         if not os.environ.get(var):
             os.environ[var] = secrets.token_urlsafe(32)     # спільний для дочірніх процесів цього запуску

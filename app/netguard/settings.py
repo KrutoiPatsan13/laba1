@@ -13,6 +13,7 @@ NETGUARD_GATEWAY_PORT   порт API Gateway / Auth Service (типово 8081)
 NETGUARD_REPORTING_PORT порт Reporting Service (типово 8082)
 NETGUARD_GATEWAY_URL    адреса API Gateway для веб-інтерфейсу (типово http://127.0.0.1:<NETGUARD_GATEWAY_PORT>)
 NETGUARD_REPORTING_URL  адреса Reporting Service для API Gateway (типово http://127.0.0.1:<NETGUARD_REPORTING_PORT>)
+NETGUARD_DB_WAIT_S      скільки секунд сервіс чекає на PostgreSQL під час старту (типово 30)
 NETGUARD_BIND_HOST      інтерфейс, на якому слухають HTTP-сервіси (типово 127.0.0.1; у контейнері — 0.0.0.0)
 NETGUARD_SIM_FAULTS     несправності для емулятора SNMP-агентів, напр.
                         "SW-LUK-02=offline;UPS-TER-01=battery_low"
@@ -53,6 +54,7 @@ def require_secret(name: str, value: str):
 @dataclass(frozen=True)
 class Settings:
     dsn: str = os.environ.get("NETGUARD_DSN", "dbname=netguard")
+    db_wait_s: float = float(os.environ.get("NETGUARD_DB_WAIT_S", "30"))
     jwt_secret: str = os.environ.get("NETGUARD_JWT_SECRET", "")
     jwt_ttl_min: int = int(os.environ.get("NETGUARD_JWT_TTL_MIN", "480"))
     storage_secret: str = os.environ.get("NETGUARD_STORAGE_SECRET", "")
