@@ -7,20 +7,20 @@ from datetime import date, datetime, time, timedelta
 from nicegui import ui
 
 from . import api
-from .common import frame
+from .common import KYIV, frame
 
 
 @ui.page("/reports")
 async def reports_page():
     await frame("Звіти", "Доступність обладнання, статистика інцидентів (MTTA, MTTR) і стан АКБ ДБЖ за обраний період")
-    today = date.today()
+    today = datetime.now(KYIV).date()
     flt = {"from": str(today - timedelta(days=7)), "to": str(today)}
     state: dict = {"reports": [], "params": {}}
 
     def period():
-        f = datetime.combine(date.fromisoformat(flt["from"]), time.min).astimezone()
-        t = min(datetime.combine(date.fromisoformat(flt["to"]), time.min).astimezone() + timedelta(days=1),
-                datetime.now().astimezone())
+        # доби — за київським часом незалежно від часового поясу сервера Web UI
+        f = datetime.combine(date.fromisoformat(flt["from"]), time.min, KYIV)
+        t = min(datetime.combine(date.fromisoformat(flt["to"]), time.min, KYIV) + timedelta(days=1), datetime.now(KYIV))
         return f, t
 
     @ui.refreshable

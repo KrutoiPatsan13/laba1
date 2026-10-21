@@ -9,25 +9,48 @@ WebSocket. До БД сервіс не підключається: дані ві
 
     python -m netguard.web                # http://127.0.0.1:8080
 """
+from urllib.parse import urlencode, urlsplit
+
+import httpx
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 from nicegui import app, ui
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from ..settings import settings
+from ..settings import require_secret, settings
 from . import api
 
 PUBLIC = {"/login"}
 
 
+def local_path(target: str) -> str:
+    """Адреса для переходу після входу — лише шлях цього сайту (без схеми й чужого хоста)."""
+    parts = urlsplit(target)
+    if parts.scheme or parts.netloc or not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return "/"
+    return target
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Неавтентифікований користувач бачить лише сторінку входу."""
+    """Сторінки — лише з дійсним токеном. Перед кожною сторінкою токен перевіряє API Gateway,
+    тож прострочений токен або заблокований користувач потрапляють на сторінку входу."""
 
     async def dispatch(self, request: Request, call_next):
-        if not app.storage.user.get("token"):
-            path = request.url.path
-            if not path.startswith("/_nicegui") and path not in PUBLIC:
-                return RedirectResponse(f"/login?redirect_to={path}")
+        path = request.url.path
+        if path.startswith("/_nicegui") or path in PUBLIC:
+            return await call_next(request)
+        token = app.storage.user.get("token")
+        if token:
+            try:
+                r = await api.client().get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+                if r.status_code == 401:
+                    app.storage.user.clear()
+                    token = None
+            except httpx.HTTPError:
+                pass                        # шлюз недоступний — сторінка сама покаже помилку
+        if not token:
+            target = path + (f"?{request.url.query}" if request.url.query else "")
+            return RedirectResponse("/login?" + urlencode({"redirect_to": target}))
         return await call_next(request)
 
 
@@ -56,7 +79,7 @@ def login_page(redirect_to: str = "/"):
             return
         u = res["user"]
         app.storage.user.update(token=res["token"], id=u["id"], name=u["name"], role=u["role"], authenticated=True)
-        ui.navigate.to(redirect_to if redirect_to.startswith("/") else "/")
+        ui.navigate.to(local_path(redirect_to))
 
     with ui.column().classes("absolute-center items-center gap-4"):
         with ui.row().classes("items-center gap-3 text-white"):
@@ -75,6 +98,7 @@ def login_page(redirect_to: str = "/"):
 
 
 def run():
+    require_secret("NETGUARD_STORAGE_SECRET", settings.storage_secret)
     ui.run(title="NetGuard Monitor", host=settings.bind_host, port=settings.web_port, storage_secret=settings.storage_secret,
            language="uk", favicon="🛰", reload=False, show=False, show_welcome_message=False)
 

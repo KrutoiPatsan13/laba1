@@ -3,6 +3,7 @@
 Дані й зміни — через API Gateway, який у кожному запиті ще раз перевіряє роль адміністратора.
 """
 import json
+import re
 from urllib.parse import quote
 
 import yaml
@@ -170,12 +171,16 @@ async def users_page():
                 if (not row or pwd.value) and len(pwd.value or "") < 8:
                     ui.notify("Пароль має містити щонайменше 8 символів", type="warning")
                     return
-                if row and row["id"] == uid() and not active.value:
-                    ui.notify("Не можна заблокувати власний обліковий запис", type="warning")
+                if row and row["id"] == uid() and (not active.value or role.value != raw["role_id"]):
+                    ui.notify("Не можна заблокувати власний обліковий запис або змінити власну роль", type="warning")
+                    return
+                chat = (tg.value or "").strip()
+                if chat and not re.fullmatch(r"-?\d{1,19}", chat):
+                    ui.notify("Telegram chat id — ціле число", type="warning")
                     return
                 body = {"full_name": name.value.strip(), "login": login.value.strip().lower(), "role_id": role.value,
                         "email": (email.value or "").strip().lower() or None,
-                        "telegram_chat_id": int(tg.value) if (tg.value or "").strip().lstrip("-").isdigit() else None,
+                        "telegram_chat_id": int(chat) if chat else None,
                         "is_active": active.value, "password": pwd.value or None}
                 try:
                     if row:
@@ -224,20 +229,21 @@ async def snmp_page():
 
     async def on_upload(e):
         name = e.file.name
-        if not name.lower().endswith((".yaml", ".yml")):
-            ui.notify("Потрібен файл .yaml або .yml", type="warning")
-            return
         try:
+            if not name.lower().endswith((".yaml", ".yml")):
+                ui.notify("Потрібен файл .yaml або .yml", type="warning")
+                return
             # файл перевіряє API Gateway (netguard.snmp_yaml), застосовує функція БД sp_apply_snmp_config
             res = await api.upload("/api/snmp/versions", await e.file.read(), quote(name))
         except api.ApiError as err:
             if "sqlstate" not in err.payload:       # помилка у файлі: причину з номером рядка формує API Gateway
                 ui.notify(err.message, type="negative", multi_line=True, timeout=15000)
-                return
-            rejected(err)
+            else:
+                rejected(err)
         else:
             await applied(res)
-        uploader.reset()
+        finally:
+            uploader.reset()                        # щоб можна було одразу обрати виправлений файл
 
     async def restore(v: dict):
         try:

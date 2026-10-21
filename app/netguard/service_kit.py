@@ -37,6 +37,8 @@ def token_principal(request: Request) -> Principal:
 
 def db_error_status(exc: psycopg.Error) -> int:
     state = exc.sqlstate or ""
+    if not state and isinstance(exc, psycopg.DataError):
+        return 422                             # відхилено ще драйвером, напр. символ NUL у тексті
     if state == "42501":                       # insufficient_privilege
         return 403
     if state.startswith("23") or state == "P0001" or state == "40001":
@@ -59,4 +61,5 @@ def install_error_handlers(app: FastAPI):
 
 def run(app: FastAPI, port: int, host: str):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)     # без запису про кожен запит між сервісами
     uvicorn.run(app, host=host, port=port, log_level="info", access_log=False)

@@ -4,10 +4,13 @@ import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from ipaddress import IPv4Address, IPv6Address
+from zoneinfo import ZoneInfo
 
 from nicegui import app, ui
 
 from . import api
+
+KYIV = ZoneInfo("Europe/Kyiv")     # часовий пояс провайдера: у ньому БД рахує доби, звіти й межі фільтрів
 
 EQ_STATUS = {"online": ("Онлайн", "positive"), "offline": ("Офлайн", "negative"),
              "unknown": ("Невідомо", "grey-6"), "maintenance": ("Обслуговування", "warning")}
@@ -130,11 +133,11 @@ async def frame(title: str, subtitle: str | None = None):
     ui.colors(primary="#1d3557", secondary="#457b9d", accent="#7b2cbf", positive="#2a9d8f",
               negative="#d62828", warning="#f4a261", info="#4d7ea8")
     ui.query("body").style("background-color: #f4f6f9")
-    u = user()
     try:
         unread = (await api.get("/api/notifications/unread-count"))["count"]
     except api.ApiError:
         unread = 0
+    u = user()          # після відповіді 401 сеанс уже очищено, а перехід на /login поставлено в чергу
     with ui.header().classes("items-center justify-between bg-primary px-4 py-2"):
         with ui.row().classes("items-center gap-2"):
             ui.button(icon="menu", on_click=lambda: drawer.toggle()).props("flat round color=white")
@@ -147,8 +150,8 @@ async def frame(title: str, subtitle: str | None = None):
                 if unread:
                     ui.badge(str(unread), color="negative").props("floating")
             with ui.column().classes("gap-0 items-end"):
-                ui.label(u["name"]).classes("text-sm font-medium")
-                ui.label(ROLE.get(u["role"], u["role"])).classes("text-xs opacity-70")
+                ui.label(u.get("name", "")).classes("text-sm font-medium")
+                ui.label(ROLE.get(u.get("role"), "")).classes("text-xs opacity-70")
             ui.button(icon="logout", on_click=logout).props("flat round color=white").tooltip("Вийти")
     current = ui.context.client.page.path
     with ui.left_drawer(value=True, bordered=True).classes("bg-white").props("width=264") as drawer:

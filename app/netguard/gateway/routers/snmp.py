@@ -49,8 +49,10 @@ async def versions(_user: Principal = Depends(admin_user)):
 async def upload(request: Request, user: Principal = Depends(admin_user)):
     """Новий YAML-файл; результат — skipped (ця версія вже активна), reactivated або applied."""
     name = PurePosixPath(unquote(request.headers.get("x-filename", ""))).name
-    if not name.lower().endswith((".yaml", ".yml")):
+    stem, _, ext = name.rpartition(".")
+    if not stem or ext.lower() not in ("yaml", "yml"):
         raise HTTPException(422, "Потрібен файл .yaml або .yml")
+    name = f"{stem[:200]}.{ext.lower()}"        # file_path у БД: до 255 символів, розширення в нижньому регістрі
     raw = bytearray()
     async for chunk in request.stream():
         raw += chunk

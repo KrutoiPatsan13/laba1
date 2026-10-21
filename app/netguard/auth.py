@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import jwt
 
-from .settings import settings
+from .settings import require_secret, settings
 
 ALGORITHM = "HS256"
 ISSUER = "netguard-gateway"
@@ -27,15 +27,20 @@ class Principal:
         return self.role == "admin"
 
 
+def _key() -> str:
+    require_secret("NETGUARD_JWT_SECRET", settings.jwt_secret)
+    return settings.jwt_secret
+
+
 def issue(user_id: int, name: str, role: str) -> str:
     now = int(time.time())
     claims = {"sub": str(user_id), "name": name, "role": role, "iss": ISSUER, "iat": now,
               "exp": now + settings.jwt_ttl_min * 60}
-    return jwt.encode(claims, settings.jwt_secret, algorithm=ALGORITHM)
+    return jwt.encode(claims, _key(), algorithm=ALGORITHM)
 
 
 def verify(token: str) -> Principal:
     """Перевіряє підпис, видавця й строк дії; помилка — jwt.InvalidTokenError."""
-    c = jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM], issuer=ISSUER,
+    c = jwt.decode(token, _key(), algorithms=[ALGORITHM], issuer=ISSUER,
                    options={"require": ["sub", "exp", "iss"]})
     return Principal(int(c["sub"]), c.get("name", ""), c.get("role", ""))

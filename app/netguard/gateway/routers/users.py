@@ -51,8 +51,10 @@ async def create_user(body: UserIn, user: Principal = Depends(admin_user)):
 
 @router.put("/{user_id}")
 async def update_user(user_id: UserId, body: UserIn, user: Principal = Depends(admin_user)):
-    if user_id == user.id and not body.is_active:
-        raise HTTPException(409, "Не можна заблокувати власний обліковий запис")
+    if user_id == user.id:
+        current = await db.one("SELECT role_id FROM users WHERE id = %s", (user_id,))
+        if not body.is_active or body.role_id != current["role_id"]:
+            raise HTTPException(409, "Не можна заблокувати власний обліковий запис або змінити власну роль")
     row = await db.run(
         "UPDATE users SET full_name = %(full_name)s, login = %(login)s, role_id = %(role_id)s, email = %(email)s,"
         " telegram_chat_id = %(telegram_chat_id)s, is_active = %(is_active)s,"

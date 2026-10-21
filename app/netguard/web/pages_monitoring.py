@@ -77,7 +77,7 @@ async def dashboard():
                       f"критичних: {s['critical']}, ескальованих: {s['escalated']}")
             stat_card("battery_charging_full", "мінімальний заряд АКБ ДБЖ",
                       f"{fmt_num(s['min_charge'])} %" if s["min_charge"] is not None else "—",
-                      "negative" if (s["min_charge"] or 100) < 50 else "positive")
+                      "negative" if s["min_charge"] is not None and s["min_charge"] < 50 else "positive")
 
         with ui.row().classes("w-full gap-4 items-start no-wrap max-lg:flex-wrap"):
             with ui.column().classes("flex-[3] gap-4 min-w-0"):

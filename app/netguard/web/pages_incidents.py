@@ -5,12 +5,12 @@
 import csv
 import io
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from nicegui import ui
 
 from . import api
-from .common import CHANNEL, EVENT, INC_STATUS, NOTIFY_STATUS, SEVERITY, badge, badge_slot, fmt_dt, fmt_num, frame
+from .common import CHANNEL, EVENT, INC_STATUS, KYIV, NOTIFY_STATUS, SEVERITY, badge, badge_slot, fmt_dt, fmt_num, frame
 
 
 def norm_text(lo, hi, unit) -> str:
@@ -52,6 +52,7 @@ async def incidents_list(status: str = "open", days: int = 7):
     except api.ApiError as e:
         ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
         return
+    days = days if days in (1, 7, 30, 365) else 7
     flt = {"status": status if status in ("open", "all", *INC_STATUS) else "open", "loc": None, "days": days}
 
     @ui.refreshable
@@ -77,7 +78,7 @@ async def incidents_list(status: str = "open", days: int = 7):
             ui.select({None: "усі", **locs}, label="Вузол", value=None,
                       on_change=lambda e: (flt.update(loc=e.value), table.refresh())).classes("w-52")
             ui.select({1: "доба", 7: "7 діб", 30: "30 діб", 365: "рік"}, label="Період",
-                      value=days if days in (1, 7, 30, 365) else 7,
+                      value=days,
                       on_change=lambda e: (flt.update(days=e.value), table.refresh())).classes("w-32")
         await table()
     ui.timer(20, table.refresh)
@@ -88,32 +89,35 @@ async def incident_card(inc_id: int):
     try:
         i = await api.get(f"/api/incidents/{inc_id}")
     except api.ApiError as e:
-        await frame("Інцидент не знайдено" if e.status == 404 else e.message)
+        if e.status != 401:         # 401 — сеанс завершено, перехід на сторінку входу вже поставлено в чергу
+            await frame("Інцидент не знайдено" if e.status in (404, 422) else e.message)
         return
     await frame(f"Інцидент №{i['id']}", f"{i['equipment']} · {i['location']}")
     r = incident_row(i)
 
-    async def act(action: str, ok: str, body: dict | None = None):
+    async def act(action: str, ok: str, body: dict | None = None) -> bool:
         # виконавця дії API Gateway бере з токена
         try:
             await api.post(f"/api/incidents/{inc_id}/{action}", body)
         except api.ApiError as e:
             ui.notify(e.message, type="negative", multi_line=True)
-            return
+            return False
         ui.notify(ok, type="positive")
         ui.navigate.to(f"/incidents/{inc_id}")
+        return True
 
     def close_dialog():
         with ui.dialog() as dlg, ui.card().classes("w-[520px] p-6 gap-3"):
             ui.label("Закриття інциденту").classes("text-lg font-semibold")
-            comment = ui.textarea("Коментар щодо вжитих заходів (обов'язково)").props("outlined autogrow").classes("w-full")
+            comment = ui.textarea("Коментар щодо вжитих заходів (обов'язково)") \
+                .props("outlined autogrow maxlength=2000 counter").classes("w-full")
 
             async def do_close():
                 if not (comment.value or "").strip():
                     ui.notify("Коментар обов'язковий", type="warning")
                     return
-                dlg.close()
-                await act("close", "Інцидент закрито", {"comment": comment.value})
+                if await act("close", "Інцидент закрито", {"comment": comment.value}):
+                    dlg.close()         # за помилки діалог лишається відкритим разом із текстом
 
             with ui.row().classes("w-full justify-end gap-2"):
                 ui.button("Скасувати", on_click=dlg.close).props("flat")
@@ -158,7 +162,11 @@ async def incident_card(inc_id: int):
                         ui.timeline_entry(subtitle=fmt_dt(at, True), title=title, icon=icon)
 
     if i["incident_type"] == "threshold":
-        hist = await api.get(f"/api/incidents/{inc_id}/history")   # проміжок навколо аварії задає API Gateway
+        try:
+            hist = await api.get(f"/api/incidents/{inc_id}/history")   # проміжок навколо аварії задає API Gateway
+        except api.ApiError as e:
+            hist = []
+            ui.label(f"Графік недоступний: {e.message}").classes("text-negative")
         marks = [{"yAxis": float(v), "lineStyle": {"color": "#d62828", "type": "dashed"}}
                  for v in (i["min_value"], i["max_value"]) if v is not None]
         with ui.card().classes("w-full p-4"):
@@ -171,8 +179,12 @@ async def incident_card(inc_id: int):
                                    "markPoint": {"data": [{"coord": [i["opened_at"], float(i["metric_value"])],
                                                            "value": "аварія"}]}}]}).classes("w-full h-60")
 
-    notes = await api.get(f"/api/incidents/{inc_id}/notifications")
     ui.label("Сповіщення за інцидентом").classes("text-lg font-semibold")
+    try:
+        notes = await api.get(f"/api/incidents/{inc_id}/notifications")
+    except api.ApiError as e:
+        ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+        return
     t = ui.table(columns=[{"name": "created", "label": "Поставлено в чергу", "field": "created", "align": "left"},
                           {"name": "user", "label": "Отримувач", "field": "user", "align": "left"},
                           {"name": "channel", "label": "Канал", "field": "channel", "align": "left"},
@@ -192,7 +204,11 @@ async def incident_card(inc_id: int):
 @ui.page("/notifications")
 async def my_notifications():
     await frame("Мої сповіщення", "Сповіщення про інциденти, надіслані вам усіма каналами")
-    rows = await api.get("/api/notifications")      # лише сповіщення користувача з токена
+    try:
+        rows = await api.get("/api/notifications")      # лише сповіщення користувача з токена
+    except api.ApiError as e:
+        ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+        return
     data = []
     for n in rows:
         sl, sc = NOTIFY_STATUS[n["status"]]
@@ -227,7 +243,7 @@ async def events_page():
     except api.ApiError as e:
         ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
         return
-    today = date.today()
+    today = datetime.now(KYIV).date()      # межі дат API Gateway трактує за київським часом
     flt = {"from": str(today - timedelta(days=7)), "to": str(today), "type": None, "loc": None, "q": ""}
     state = {"rows": []}
 

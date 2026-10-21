@@ -86,8 +86,9 @@ cd app
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 export NETGUARD_DSN="host=localhost dbname=netguard user=postgres"   # власник схеми netguard
-export NETGUARD_STORAGE_SECRET="довгий-випадковий-рядок"         # сеанси Web UI
-export NETGUARD_JWT_SECRET="інший-довгий-випадковий-рядок"         # токени API Gateway і Reporting Service
+# секрети (щонайменше 32 символи); якщо не задати, python -m netguard згенерує випадкові на час роботи
+export NETGUARD_STORAGE_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"   # сеанси Web UI
+export NETGUARD_JWT_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"       # токени JWT
 python -m netguard.demo_setup --reset            # або розгортання БД вручну (нижче)
 export NETGUARD_SNMP_CONFIG=../config/snmp_config.demo.yaml   # необов'язково: Polling Service застосовує файл після змін
 NETGUARD_SIM_FAULTS="SW-LUK-02=offline;UPS-TER-01=battery_low" python -m netguard

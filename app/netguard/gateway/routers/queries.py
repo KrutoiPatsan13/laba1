@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import decimal_encoder, jsonable_encoder
 from psycopg import postgres
 from psycopg.rows import tuple_row
+from psycopg.types.multirange import Multirange
 from psycopg.types.range import Range
 from pydantic import BaseModel, Field
 
@@ -217,9 +218,17 @@ UPDATE threshold SET max_value = 99 WHERE id = 1;"""),
 ]
 BY_KEY = {q["key"]: q for q in QUERIES}
 MAX_ROWS = 500
-CELL = {bytes: lambda b: "\\x" + b.hex(), Range: str,        # bytea і діапазони — текстом
+CELL = {bytes: lambda b: "\\x" + b.hex(), Range: str, Multirange: str,   # bytea і діапазони — текстом
         float: lambda f: f if math.isfinite(f) else str(f),  # NaN і нескінченності в JSON немає
         Decimal: lambda d: decimal_encoder(d) if d.is_finite() else str(d)}
+
+
+def _cell(value):
+    """Значення результату → JSON; те, чого JSON не має (напр. мультидіапазони), — текстом."""
+    try:
+        return jsonable_encoder(value, custom_encoder=CELL)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 class SqlIn(BaseModel):
@@ -271,7 +280,7 @@ async def execute(sql: str, kind: str, role: str | None = None, single: bool = F
         except psycopg.Error as e:
             cols, types, rows, err = None, [], [], _error(e)
         ms = (time.perf_counter() - t0) * 1000
-    return {"columns": cols, "types": types, "rows": jsonable_encoder(rows, custom_encoder=CELL), "ms": ms,
+    return {"columns": cols, "types": types, "rows": [[_cell(v) for v in r] for r in rows], "ms": ms,
             "error": err}
 
 

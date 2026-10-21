@@ -8,6 +8,7 @@ Web UI — окремий мікросервіс без доступу до БД
     rows = await api.get("/api/incidents", {"status": "open"})
     await api.post(f"/api/incidents/{inc_id}/acknowledge")
 """
+import logging
 from email.message import Message
 
 import httpx
@@ -16,6 +17,7 @@ from nicegui import app, ui
 from ..settings import settings
 
 _client: httpx.AsyncClient | None = None
+logging.getLogger("httpx").setLevel(logging.WARNING)     # без запису про кожен запит до API Gateway
 
 
 class ApiError(Exception):
