@@ -1,16 +1,16 @@
-"""Інциденти та їхній життєвий цикл (FR-07, FR-08), сповіщення користувача, журнал подій (FR-09)."""
+"""Інциденти та їхній життєвий цикл (FR-07, FR-08), сповіщення користувача, журнал подій (FR-09).
+
+Дані й дії — через API Gateway (/api/incidents, /api/notifications, /api/events, /api/reference).
+"""
 import csv
 import io
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from nicegui import ui
 
-from ..db import error_text
-from .common import (CHANNEL, EVENT, INC_STATUS, NOTIFY_STATUS, SEVERITY, badge, badge_slot, db, fmt_dt, fmt_num,
-                     frame, uid)
-
-OPEN = ("new", "escalated", "acknowledged")
+from . import api
+from .common import CHANNEL, EVENT, INC_STATUS, NOTIFY_STATUS, SEVERITY, badge, badge_slot, fmt_dt, fmt_num, frame
 
 
 def norm_text(lo, hi, unit) -> str:
@@ -47,17 +47,21 @@ INC_COLUMNS = [
 @ui.page("/incidents")
 async def incidents_list(status: str = "open", days: int = 7):
     await frame("Інциденти", "Аварійні події: порушення порогових значень і недоступність обладнання")
-    locs = {r["id"]: r["name"] for r in await db.all("SELECT id, name FROM locations ORDER BY name")}
+    try:
+        locs = {r["id"]: r["name"] for r in (await api.get("/api/reference"))["locations"]}
+    except api.ApiError as e:
+        ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+        return
     flt = {"status": status if status in ("open", "all", *INC_STATUS) else "open", "loc": None, "days": days}
 
     @ui.refreshable
     async def table():
-        statuses = list(OPEN) if flt["status"] == "open" else list(INC_STATUS) if flt["status"] == "all" \
-            else [flt["status"]]
-        rows = await db.all(
-            "SELECT * FROM v_incident_list WHERE status::text = ANY(%s) AND (%s::int IS NULL OR location_id = %s)"
-            " AND opened_at > now() - make_interval(days => %s) ORDER BY opened_at DESC",
-            (statuses, flt["loc"], flt["loc"], flt["days"]))
+        try:
+            rows = await api.get("/api/incidents", {"status": flt["status"], "location_id": flt["loc"],
+                                                    "days": flt["days"]})
+        except api.ApiError as e:
+            ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+            return
         t = ui.table(columns=INC_COLUMNS, rows=[incident_row(r) for r in rows], row_key="id", pagination=15) \
             .classes("w-full")
         badge_slot(t, "status")
@@ -81,18 +85,20 @@ async def incidents_list(status: str = "open", days: int = 7):
 
 @ui.page("/incidents/{inc_id}")
 async def incident_card(inc_id: int):
-    i = await db.one("SELECT * FROM v_incident_list WHERE id = %s", (inc_id,))
-    if not i:
-        await frame("Інцидент не знайдено")
+    try:
+        i = await api.get(f"/api/incidents/{inc_id}")
+    except api.ApiError as e:
+        await frame("Інцидент не знайдено" if e.status == 404 else e.message)
         return
     await frame(f"Інцидент №{i['id']}", f"{i['equipment']} · {i['location']}")
     r = incident_row(i)
 
-    async def act(sql: str, params: tuple, ok: str):
+    async def act(action: str, ok: str, body: dict | None = None):
+        # виконавця дії API Gateway бере з токена
         try:
-            await db.run(sql, params, user_id=uid())
-        except Exception as e:
-            ui.notify(error_text(e), type="negative", multi_line=True)
+            await api.post(f"/api/incidents/{inc_id}/{action}", body)
+        except api.ApiError as e:
+            ui.notify(e.message, type="negative", multi_line=True)
             return
         ui.notify(ok, type="positive")
         ui.navigate.to(f"/incidents/{inc_id}")
@@ -107,7 +113,7 @@ async def incident_card(inc_id: int):
                     ui.notify("Коментар обов'язковий", type="warning")
                     return
                 dlg.close()
-                await act("CALL sp_close_incident(%s, %s, %s)", (inc_id, uid(), comment.value), "Інцидент закрито")
+                await act("close", "Інцидент закрито", {"comment": comment.value})
 
             with ui.row().classes("w-full justify-end gap-2"):
                 ui.button("Скасувати", on_click=dlg.close).props("flat")
@@ -131,11 +137,11 @@ async def incident_card(inc_id: int):
                     ui.label(v).classes("text-sm")
             with ui.row().classes("gap-2 mt-4"):
                 if i["status"] in ("new", "escalated"):
-                    ui.button("Прийняти в роботу", icon="pan_tool", on_click=lambda: act(
-                        "CALL sp_acknowledge_incident(%s, %s)", (inc_id, uid()), "Інцидент прийнято"))
+                    ui.button("Прийняти в роботу", icon="pan_tool",
+                              on_click=lambda: act("acknowledge", "Інцидент прийнято"))
                 if i["status"] == "acknowledged":
-                    ui.button("Позначити усунутим", icon="build_circle", color="info", on_click=lambda: act(
-                        "CALL sp_resolve_incident(%s, %s)", (inc_id, uid()), "Несправність позначено усунутою"))
+                    ui.button("Позначити усунутим", icon="build_circle", color="info",
+                              on_click=lambda: act("resolve", "Несправність позначено усунутою"))
                 if i["status"] == "resolved":
                     ui.button("Закрити з коментарем", icon="task_alt", color="positive", on_click=close_dialog)
                 ui.button("Картка пристрою", icon="router",
@@ -152,9 +158,7 @@ async def incident_card(inc_id: int):
                         ui.timeline_entry(subtitle=fmt_dt(at, True), title=title, icon=icon)
 
     if i["incident_type"] == "threshold":
-        hist = await db.all("SELECT * FROM fn_metric_history(%s, %s, %s, %s, '5 minutes')",
-                            (i["equipment_id"], i["metric_code"], i["opened_at"] - timedelta(hours=3),
-                             (i["closed_at"] or i["resolved_at"] or datetime.now().astimezone()) + timedelta(hours=1)))
+        hist = await api.get(f"/api/incidents/{inc_id}/history")   # проміжок навколо аварії задає API Gateway
         marks = [{"yAxis": float(v), "lineStyle": {"color": "#d62828", "type": "dashed"}}
                  for v in (i["min_value"], i["max_value"]) if v is not None]
         with ui.card().classes("w-full p-4"):
@@ -162,14 +166,12 @@ async def incident_card(inc_id: int):
             ui.echart({"grid": {"left": 50, "right": 30, "top": 20, "bottom": 30}, "tooltip": {"trigger": "axis"},
                        "xAxis": {"type": "time"}, "yAxis": {"type": "value", "scale": True},
                        "series": [{"type": "line", "showSymbol": False, "lineStyle": {"color": "#1d3557"},
-                                   "data": [[h["bucket"].isoformat(), round(h["avg_value"], 2)] for h in hist],
+                                   "data": [[h["bucket"], round(h["avg_value"], 2)] for h in hist],
                                    "markLine": {"symbol": "none", "data": marks},
-                                   "markPoint": {"data": [{"coord": [i["opened_at"].isoformat(), float(i["metric_value"])],
+                                   "markPoint": {"data": [{"coord": [i["opened_at"], float(i["metric_value"])],
                                                            "value": "аварія"}]}}]}).classes("w-full h-60")
 
-    notes = await db.all(
-        "SELECT n.*, u.full_name FROM notification n JOIN users u ON u.id = n.user_id WHERE n.incident_id = %s"
-        " ORDER BY n.created_at, u.full_name, n.channel", (inc_id,))
+    notes = await api.get(f"/api/incidents/{inc_id}/notifications")
     ui.label("Сповіщення за інцидентом").classes("text-lg font-semibold")
     t = ui.table(columns=[{"name": "created", "label": "Поставлено в чергу", "field": "created", "align": "left"},
                           {"name": "user", "label": "Отримувач", "field": "user", "align": "left"},
@@ -190,10 +192,7 @@ async def incident_card(inc_id: int):
 @ui.page("/notifications")
 async def my_notifications():
     await frame("Мої сповіщення", "Сповіщення про інциденти, надіслані вам усіма каналами")
-    rows = await db.all(
-        "SELECT n.*, i.equipment, i.location, i.metric_name, i.metric_value, i.unit, i.incident_type, i.severity,"
-        " i.status AS inc_status FROM notification n JOIN v_incident_list i ON i.id = n.incident_id"
-        " WHERE n.user_id = %s ORDER BY n.created_at DESC LIMIT 300", (uid(),))
+    rows = await api.get("/api/notifications")      # лише сповіщення користувача з токена
     data = []
     for n in rows:
         sl, sc = NOTIFY_STATUS[n["status"]]
@@ -223,22 +222,24 @@ async def my_notifications():
 @ui.page("/events")
 async def events_page():
     await frame("Журнал подій", "Зміни стану обладнання, інциденти, дії користувачів, зміни конфігурації, автентифікація")
-    locs = {r["id"]: r["name"] for r in await db.all("SELECT id, name FROM locations ORDER BY name")}
+    try:
+        locs = {r["id"]: r["name"] for r in (await api.get("/api/reference"))["locations"]}
+    except api.ApiError as e:
+        ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+        return
     today = date.today()
     flt = {"from": str(today - timedelta(days=7)), "to": str(today), "type": None, "loc": None, "q": ""}
     state = {"rows": []}
 
     @ui.refreshable
     async def table():
-        rows = await db.all(
-            "SELECT ev.*, u.full_name, e.name AS equipment, l.name AS location FROM event_log ev"
-            " LEFT JOIN users u ON u.id = ev.user_id LEFT JOIN equipment e ON e.id = ev.equipment_id"
-            " LEFT JOIN locations l ON l.id = e.location_id"
-            " WHERE ev.created_at >= %(f)s::date AND ev.created_at < %(t)s::date + 1"
-            "   AND (%(type)s::text IS NULL OR ev.event_type::text = %(type)s)"
-            "   AND (%(loc)s::int IS NULL OR e.location_id = %(loc)s) AND ev.message ILIKE %(q)s"
-            " ORDER BY ev.created_at DESC, ev.id DESC LIMIT 1000",
-            {"f": flt["from"], "t": flt["to"], "type": flt["type"], "loc": flt["loc"], "q": f"%{flt['q']}%"})
+        try:
+            rows = await api.get("/api/events", {"from": flt["from"], "to": flt["to"], "type": flt["type"],
+                                                 "location_id": flt["loc"], "q": flt["q"]})
+        except api.ApiError as e:
+            state["rows"] = []
+            ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+            return
         state["rows"] = rows
         data = [{"id": r["id"], "at": fmt_dt(r["created_at"], True), "type_label": EVENT[r["event_type"]][0],
                  "type_color": EVENT[r["event_type"]][1], "user": r["full_name"] or "система",

@@ -5,14 +5,18 @@
 #                                   # документація API Gateway — http://127.0.0.1:8081/docs
 #
 # Перший старт db розгортає БД (docker/initdb/10-netguard.sh): sql/schema.sql → sql/lr2_logic.sql →
-# sql/seed_reference.sql і, якщо задано NETGUARD_ADMIN_PASSWORD, перший адміністратор; далі
-# Polling Service застосовує YAML-конфігурацію SNMP з config/.
+# sql/seed_reference.sql; далі Polling Service застосовує YAML-конфігурацію SNMP з config/.
 #
 # Обслуговування — сервіс maintenance (з «up» не запускається):
+#   docker compose run --rm maintenance python -m netguard.maintenance create-admin --login admin --name "Прізвище Ім'я"
+#                                                                               # перший адміністратор (пароль запитає)
 #   docker compose run --rm maintenance                                         # секції телеметрії (щомісяця, cron)
 #   docker compose run --rm maintenance python -m netguard.maintenance backup   # копія БД у томі backup
-#   docker compose run --rm maintenance python -m netguard.demo_setup --reset   # демо-дані (усі дані буде видалено);
-#                                                       # у .env — NETGUARD_SNMP_CONFIG_FILE=snmp_config.demo.yaml
+#   docker compose run --rm maintenance python -m netguard.demo_setup --reset   # демо-дані (усі дані буде видалено)
+# Для демо-даних задайте в .env NETGUARD_SNMP_CONFIG_FILE=snmp_config.demo.yaml (інакше Polling Service
+# після перезапуску знову застосує базовий файл і деактивує демонстраційні пристрої), а якщо сервіси
+# вже працюють — після demo_setup виконайте docker compose restart: їхні з'єднання тримають
+# підготовлені запити до старої схеми.
 #
 # Усі сервіси — один образ (Dockerfile). Сервіси з доступом до БД підключаються від імені власника
 # схеми netguard і самі перемикаються на свої ролі ng_*; Web UI до БД не підключається. Назовні
@@ -54,8 +58,6 @@ services:
       POSTGRES_DB: netguard
       POSTGRES_USER: netguard
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD у .env}"
-      NETGUARD_ADMIN_LOGIN: "${NETGUARD_ADMIN_LOGIN:-admin}"
-      NETGUARD_ADMIN_PASSWORD: "${NETGUARD_ADMIN_PASSWORD:-}"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro

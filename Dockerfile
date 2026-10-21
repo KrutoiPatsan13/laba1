@@ -1,6 +1,7 @@
 # NetGuard Monitor — образ мікросервісів. Образ один для всіх сервісів (Polling, Alerting,
 # Notification, Reporting, API Gateway, Web UI); який сервіс запустити, задає команда
-# в docker-compose.yml. Без команди запускаються всі сервіси в одному контейнері.
+# в docker-compose.yml. Без команди всі сервіси запускаються в одному контейнері
+# (python -m netguard; щоб веб-інтерфейс був доступний ззовні — NETGUARD_BIND_HOST=0.0.0.0).
 #
 #     docker build -t netguard-monitor:1.0 .
 FROM python:3.13-slim
