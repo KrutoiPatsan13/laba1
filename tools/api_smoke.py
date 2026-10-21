@@ -16,7 +16,7 @@ import httpx
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8081").rstrip("/")
 PUBLIC = {("POST", "/api/auth/login")}
 ADMIN_TAGS = {"thresholds", "users", "snmp", "queries"}
-SAMPLE = {"from": "2026-01-01T00:00:00+02:00", "to": "2030-01-01T00:00:00+02:00", "fmt": "csv", "key": "uptime"}
+SAMPLE = {"from": "2026-01-01T00:00:00+02:00", "to": "2030-01-01T00:00:00+02:00", "fmt": "xlsx"}
 
 
 def token(c: httpx.Client, login: str, password: str) -> str:
