@@ -11,19 +11,28 @@
      позначає пристрій offline і відкриває інцидент);
   4. план перечитується щохвилини, тож зміни YAML-конфігурації підхоплюються без перезапуску.
 
+Якщо задано NETGUARD_SNMP_CONFIG (шлях до YAML-файлу), сервіс під час старту й щохвилини
+порівнює SHA-256 файлу з востаннє обробленим і після зміни перевіряє файл та застосовує
+його функцією БД sp_apply_snmp_config. Помилка у файлі чи в БД лише пишеться в лог —
+чинною лишається попередня версія конфігурації.
+
 Кожен пристрій опитується у власній транзакції: помилка одного не впливає на інші.
 SNMP-агентів емулює netguard.services.emulator (у лабораторному стенді немає обладнання).
 
     python -m netguard.services.poller
 """
+import hashlib
 import logging
 import signal
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from psycopg.types.json import Jsonb
+
 from ..db import connect
 from ..settings import settings
+from ..snmp_yaml import ConfigError, load
 from .emulator import Emulator, SnmpTimeout, parse_faults
 
 log = logging.getLogger("netguard.poller")
@@ -37,7 +46,36 @@ class Poller:
         self.plan: dict[int, list[dict]] = {}
         self.plan_loaded = 0.0
         self.next_due: dict[int, float] = {}
+        self.config_sha: str | None = None    # SHA-256 востаннє обробленого вмісту YAML-файлу
         self.running = True
+
+    def sync_config(self):
+        path = settings.snmp_config
+        if not path:
+            return
+        try:
+            raw = path.read_bytes()
+        except OSError as e:
+            log.error("YAML-конфігурацію не прочитано: %s", e)
+            return
+        sha = hashlib.sha256(raw).hexdigest()
+        if sha == self.config_sha:
+            return
+        self.config_sha = sha                 # помилковий файл не перевіряємо щохвилини знову
+        try:
+            cfg, sha = load(raw)
+            with self.conn.transaction():
+                res = self.conn.execute("SELECT sp_apply_snmp_config(%s, %s, %s, NULL) AS r",
+                                        (str(path), sha, Jsonb(cfg))).fetchone()["r"]
+        except ConfigError as e:
+            log.error("YAML-конфігурацію не застосовано, помилка у файлі: %s", e)
+            return
+        except Exception as e:              # порушення обмежень БД: транзакцію відкочено
+            log.error("YAML-конфігурацію не застосовано, помилка БД: %s", str(e).strip())
+            return
+        log.info("YAML-конфігурація %s (SHA-256 %s…): %s", path.name, sha[:12],
+                 {"skipped": "уже активна", "reactivated": "активовано раніше застосовану версію",
+                  "applied": "застосовано нову версію"}[res])
 
     def load_plan(self):
         rows = self.conn.execute("SELECT * FROM v_snmp_poll_plan ORDER BY equipment_id, metric_id").fetchall()
@@ -70,6 +108,7 @@ class Poller:
     def run(self):
         while self.running:
             if time.monotonic() - self.plan_loaded > PLAN_TTL:
+                self.sync_config()
                 self.load_plan()
             now = time.monotonic()
             for eq_id, oids in self.plan.items():

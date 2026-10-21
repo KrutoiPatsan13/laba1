@@ -372,7 +372,7 @@ async def equipment_card(eq_id: int, period: str = "24h"):
                 with ui.card().classes("w-full p-3"):
                     ui.label(f"{m['name']}, {unit}").classes("font-semibold")
                     ui.echart({
-                        "grid": {"left": 50, "right": 70, "top": 20, "bottom": 30},
+                        "grid": {"left": 50, "right": 95, "top": 20, "bottom": 30},
                         "tooltip": {"trigger": "axis"},
                         "xAxis": {"type": "time"},
                         "yAxis": {"type": "value", "scale": True},

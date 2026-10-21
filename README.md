@@ -65,6 +65,7 @@ Python, що з нею працює: сервіси опитування, ана
 | Веб-інтерфейс | `python -m netguard.web` | панель моніторингу, обладнання, інциденти, звіти, адміністрування, запити до БД |
 | Усе разом | `python -m netguard` | запускає всі сервіси окремими процесами |
 | Демо-дані | `python -m netguard.demo_setup --reset` | схема, логіка, довідники, користувачі, 2 версії YAML, історія за 7 діб |
+| Обслуговування | `python -m netguard.maintenance partitions\|backup\|restore` | секції телеметрії (наперед і видалення старших за 6 місяців), резервна копія `pg_dump` і відновлення; запускати за розкладом від імені власника схеми |
 
 Інтерфейс написано на Python бібліотекою NiceGUI: вона перетворює Python-код на веб-сторінки
 (Vue/Quasar у браузері) і працює поверх FastAPI. Брокер повідомлень із ЛР2 ТСПП (RabbitMQ)
@@ -79,6 +80,7 @@ pip install -r requirements.txt
 export NETGUARD_DSN="host=localhost dbname=netguard user=postgres"   # власник схеми netguard
 export NETGUARD_STORAGE_SECRET="довгий-випадковий-рядок"
 python -m netguard.demo_setup --reset            # або розгортання БД вручну (нижче)
+export NETGUARD_SNMP_CONFIG=../config/snmp_config.demo.yaml   # необов'язково: Polling Service застосовує файл після змін
 NETGUARD_SIM_FAULTS="SW-VYN-02=offline;UPS-TRO-01=battery_low" python -m netguard
 # веб-інтерфейс: http://localhost:8080
 ```
@@ -91,7 +93,9 @@ NETGUARD_SIM_FAULTS="SW-VYN-02=offline;UPS-TRO-01=battery_low" python -m netguar
 
 ## Зв'язок БД з YAML-конфігурацією SNMP
 
-`config/snmp_config.yaml` описує, **як** опитувати обладнання. Спершу файл суворо перевіряється
+`config/snmp_config.yaml` описує, **як** опитувати обладнання. Файл застосовують Polling Service
+(якщо задано `NETGUARD_SNMP_CONFIG` — під час старту й після кожної зміни файлу), сторінка
+«Конфігурація SNMP» вебінтерфейсу або утиліта командного рядка; усі три викликають ту саму функцію БД. Спершу файл суворо перевіряється
 (`app/netguard/snmp_yaml.py`): дозволені лише відомі ключі, дублікати ключів, імен та IP-адрес
 заборонені, числа й адреси мають правильний тип, рядки не довші за стовпці БД, секрети записано
 тільки як `${VAR}`, для SNMPv3 обов'язковий `auth_protocol`. Помилка у файлі означає повідомлення

@@ -8,7 +8,7 @@ digraph G {
   users [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2" COLOR="#7F7F7F" STYLE="dashed"><TR><TD BGCOLOR="#DCE6F2"><B>users</B></TD></TR><HR/><TR><TD ALIGN="LEFT"><U>id</U> <FONT POINT-SIZE="9">(див. рис. 6)</FONT></TD></TR></TABLE>>];
   equipment_type [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2" COLOR="#7F7F7F" STYLE="dashed"><TR><TD BGCOLOR="#E2EFDA"><B>equipment_type</B></TD></TR><HR/><TR><TD ALIGN="LEFT"><U>id</U> <FONT POINT-SIZE="9">(див. рис. 4)</FONT></TD></TR></TABLE>>];
   metric [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2" COLOR="#7F7F7F" STYLE="dashed"><TR><TD BGCOLOR="#FFF2CC"><B>metric</B></TD></TR><HR/><TR><TD ALIGN="LEFT"><U>id</U> <FONT POINT-SIZE="9">(див. рис. 4)</FONT></TD></TR></TABLE>>];
-  equipment [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2" COLOR="#7F7F7F" STYLE="dashed"><TR><TD BGCOLOR="#E2EFDA"><B>equipment</B></TD></TR><HR/><TR><TD ALIGN="LEFT"><U>id</U> <FONT POINT-SIZE="9">(див. рис. 4)</FONT></TD></TR></TABLE>>];
+  equipment [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2" COLOR="#7F7F7F" STYLE="dashed"><TR><TD BGCOLOR="#E2EFDA"><B>equipment</B></TD></TR><HR/><TR><TD ALIGN="LEFT"><I>config_id, credential_id</I> <FONT POINT-SIZE="9">(див. рис. 4)</FONT></TD></TR></TABLE>>];
   users -> snmp_config [arrowtail=teeodot, arrowhead=crowodot, style=dashed];
   snmp_config -> snmp_credential [arrowtail=teetee, arrowhead=crowodot, style=solid];
   snmp_config -> snmp_oid_map [arrowtail=teetee, arrowhead=crowodot, style=solid];

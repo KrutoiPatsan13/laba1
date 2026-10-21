@@ -1,20 +1,20 @@
 digraph flow_01_general {
-  graph [rankdir=TB, splines=ortho, nodesep=0.45, ranksep=0.32, fontname="DejaVu Sans", pad=0.2, forcelabels=true];
-  node [fontname="DejaVu Sans", fontsize=11, width=2.6, height=0.45, color="#1d3557", penwidth=1.1];
+  graph [rankdir=TB, splines=ortho, nodesep=0.35, ranksep=0.25, fontname="DejaVu Sans", pad=0.2, forcelabels=true];
+  node [fontname="DejaVu Sans", fontsize=11, width=1.3, height=0.42, color="#1d3557", penwidth=1.1];
   edge [fontname="DejaVu Sans", fontsize=10, color="#333333", arrowsize=0.7];
   n1 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Початок>, margin="0.25,0.06"];
   n2 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">Розгортання БД: схема, програмна логіка,<BR/>довідники (sql/*.sql)</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
-  n3 [shape=parallelogram, style=filled, fillcolor="#eef7ef", label=<YAML-файл конфігурації SNMP>, margin="0.02,0.04"];
+  n3 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<YAML-файл конфігурації SNMP>, margin="0.06,0.03"];
   n4 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">Перевірка файлу та<BR/>sp_apply_snmp_config</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
   n5 [shape=box, label=<Запуск сервісів: Polling, Alerting,<BR/>Notification, веб-інтерфейс>];
   n6 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">Цикл опитування обладнання<BR/>(Polling Service)</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
   n7 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Показник поза<BR/>порогом або пристрій<BR/>недоступний?>, margin="0.02,0.02"];
   n8 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">Відкриття інциденту й постановка<BR/>сповіщень у чергу (тригери БД)</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
-  n9 [shape=parallelogram, style=filled, fillcolor="#eef7ef", label=<Сповіщення інженерам:<BR/>веб-панель, e-mail, Telegram>, margin="0.02,0.04"];
+  n9 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Сповіщення інженерам:<BR/>веб-панель, e-mail, Telegram>, margin="0.06,0.03"];
   n10 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Інцидент прийнято<BR/>за 5 хв?>, margin="0.02,0.02"];
   n11 [shape=box, label=<Ескалація інциденту<BR/>адміністраторам>];
   n12 [shape=box, label=<Інженер приймає, усуває й закриває<BR/>інцидент у веб-інтерфейсі>];
-  n13 [shape=parallelogram, style=filled, fillcolor="#eef7ef", label=<Панель стану, графіки, журнал<BR/>подій, звіти Excel/PDF>, margin="0.02,0.04"];
+  n13 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Панель стану, графіки, журнал<BR/>подій, звіти Excel/PDF>, margin="0.06,0.03"];
   n14 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Сервіси<BR/>зупинено?>, margin="0.02,0.02"];
   n15 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Кінець>, margin="0.25,0.06"];
   n1 -> n2;

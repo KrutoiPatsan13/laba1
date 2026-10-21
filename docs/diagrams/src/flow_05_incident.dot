@@ -1,32 +1,35 @@
 digraph flow_05_incident {
-  graph [rankdir=TB, splines=ortho, nodesep=0.45, ranksep=0.32, fontname="DejaVu Sans", pad=0.2, forcelabels=true];
-  node [fontname="DejaVu Sans", fontsize=11, width=2.6, height=0.45, color="#1d3557", penwidth=1.1];
+  graph [rankdir=TB, splines=ortho, nodesep=0.35, ranksep=0.25, fontname="DejaVu Sans", pad=0.2, forcelabels=true];
+  node [fontname="DejaVu Sans", fontsize=11, width=1.3, height=0.42, color="#1d3557", penwidth=1.1];
   edge [fontname="DejaVu Sans", fontsize=10, color="#333333", arrowsize=0.7];
   n1 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Початок: інженер відкриває<BR/>картку інциденту>, margin="0.25,0.06"];
-  n2 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Статус<BR/>інциденту?>, margin="0.02,0.02"];
-  n3 [shape=box, label=<Кнопка «Прийняти в роботу»>];
-  n4 [shape=box, label=<Кнопка «Позначити усунутим»>];
-  n5 [shape=parallelogram, style=filled, fillcolor="#eef7ef", label=<Кнопка «Закрити»:<BR/>коментар щодо вжитих заходів>, margin="0.02,0.04"];
-  n6 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">CALL sp_acknowledge_incident /<BR/>sp_resolve_incident / sp_close_incident</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
-  n7 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Перевірки БД пройдено?<BR/>(перехід, користувач,<BR/>коментар)>, margin="0.02,0.02"];
-  n8 [shape=box, label=<COMMIT; тригер пише перехід<BR/>у журнал подій>];
-  n9 [shape=box, label=<ROLLBACK; повідомлення<BR/>про помилку>];
-  n10 [shape=parallelogram, style=filled, fillcolor="#eef7ef", label=<Оновлена картка інциденту>, margin="0.02,0.04"];
-  n11 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Кінець>, margin="0.25,0.06"];
+  n2 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Інцидент<BR/>закрито?>, margin="0.02,0.02"];
+  n3 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Статус<BR/>інциденту?>, margin="0.02,0.02"];
+  n4 [shape=box, label=<Кнопка<BR/>«Прийняти в роботу»>];
+  n5 [shape=box, label=<Кнопка<BR/>«Позначити усунутим»>];
+  n6 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Кнопка «Закрити» і коментар>, margin="0.06,0.03"];
+  n7 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">CALL sp_acknowledge_incident /<BR/>sp_resolve_incident / sp_close_incident</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n8 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Перевірки БД<BR/>пройдено?>, margin="0.02,0.02"];
+  n9 [shape=box, label=<COMMIT; тригер пише<BR/>перехід у журнал подій>];
+  n10 [shape=box, label=<ROLLBACK;<BR/>повідомлення про помилку>];
+  n11 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Оновлена картка інциденту>, margin="0.06,0.03"];
+  n12 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Кінець>, margin="0.25,0.06"];
   n1 -> n2;
-  n2 -> n3 [xlabel=" new,
+  n2 -> n3 [xlabel=" ні "];
+  n3 -> n4 [xlabel=" new,
 escalated "];
-  n2 -> n4 [xlabel=" acknowledged "];
-  n2 -> n5 [xlabel=" resolved "];
-  n2 -> n10 [xlabel=" closed "];
-  n3 -> n6;
-  n4 -> n6;
-  n5 -> n6;
+  n3 -> n5 [xlabel=" acknowledged "];
+  n3 -> n6 [xlabel=" resolved "];
+  n4 -> n7;
+  n5 -> n7;
   n6 -> n7;
-  n7 -> n8 [xlabel=" так "];
-  n7 -> n9 [xlabel=" ні "];
-  n8 -> n10;
-  n9 -> n10;
+  n7 -> n8;
+  n8 -> n9 [xlabel=" так "];
+  n8 -> n10 [xlabel=" ні "];
+  n9 -> n11;
   n10 -> n11;
-  { rank=same; n3; n4; n5; }
+  n11 -> n12;
+  n2 -> n12 [xlabel=" так "];
+  { rank=same; n4; n5; n6; }
+  { rank=same; n9; n10; }
 }

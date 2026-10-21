@@ -3,3 +3,4 @@ __pycache__/
 var/
 .venv/
 app/.venv/
+.nicegui/

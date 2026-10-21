@@ -11,8 +11,8 @@ digraph G {
   metric_reading [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" COLOR="#404040"><TR><TD COLSPAN="4" BGCOLOR="#FFF2CC" ALIGN="CENTER"><B>metric_reading  «partitioned»</B></TD></TR><HR/><TR><TD ALIGN="LEFT"><FONT POINT-SIZE="9">PK,FK</FONT></TD><TD ALIGN="LEFT"><U>equipment_id</U></TD><TD ALIGN="LEFT"><FONT POINT-SIZE="9">INTEGER</FONT></TD><TD ALIGN="LEFT"> </TD></TR><TR><TD ALIGN="LEFT"><FONT POINT-SIZE="9">PK,FK</FONT></TD><TD ALIGN="LEFT"><U>metric_id</U></TD><TD ALIGN="LEFT"><FONT POINT-SIZE="9">SMALLINT</FONT></TD><TD ALIGN="LEFT"> </TD></TR><TR><TD ALIGN="LEFT"><FONT POINT-SIZE="9">PK</FONT></TD><TD ALIGN="LEFT"><U>read_at</U></TD><TD ALIGN="LEFT"><FONT POINT-SIZE="9">TIMESTAMPTZ</FONT></TD><TD ALIGN="LEFT"> </TD></TR><HR/><TR><TD ALIGN="LEFT"> </TD><TD ALIGN="LEFT">value</TD><TD ALIGN="LEFT"><FONT POINT-SIZE="9">DOUBLE PRECISION</FONT></TD><TD ALIGN="LEFT"><FONT POINT-SIZE="8">NN</FONT></TD></TR></TABLE>>];
   snmp_credential [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2" COLOR="#7F7F7F" STYLE="dashed"><TR><TD BGCOLOR="#E4DFEC"><B>snmp_credential</B></TD></TR><HR/><TR><TD ALIGN="LEFT"><U>id</U> <FONT POINT-SIZE="9">(див. рис. 6)</FONT></TD></TR></TABLE>>];
   snmp_config [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2" COLOR="#7F7F7F" STYLE="dashed"><TR><TD BGCOLOR="#E4DFEC"><B>snmp_config</B></TD></TR><HR/><TR><TD ALIGN="LEFT"><U>id</U> <FONT POINT-SIZE="9">(див. рис. 6)</FONT></TD></TR></TABLE>>];
-  snmp_config -> equipment [arrowtail=teeodot, arrowhead=crowodot, style=dashed];
-  snmp_credential -> equipment [arrowtail=teetee, arrowhead=crowodot, style=solid];
+  equipment -> snmp_config [arrowtail=crowodot, arrowhead=teeodot, style=dashed];
+  equipment -> snmp_credential [arrowtail=crowodot, arrowhead=teetee, style=solid];
   locations -> equipment [arrowtail=teetee, arrowhead=crowodot, style=solid];
   equipment_type -> equipment [arrowtail=teetee, arrowhead=crowodot, style=solid];
   equipment -> ups_details [arrowtail=teetee, arrowhead=teeodot, style=solid];

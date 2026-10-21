@@ -65,16 +65,17 @@ async def main():
         opts = dict(viewport={"width": 1440, "height": 900}, timezone_id="Europe/Kyiv", locale="uk-UA",
                     device_scale_factor=1.5)
         admin = await login(await browser.new_context(**opts), "admin", "Admin#2026")
-        await shot(admin, "/", "02_dashboard", 1400)
-        await shot(admin, "/equipment", "03_equipment", 1250)
-        await shot(admin, f"/equipment/{i['ups']}?period=7d", "04_equipment_card", 1500, 3500)
-        await shot(admin, "/incidents?status=all&days=7", "05_incidents", 1250)
-        await shot(admin, f"/incidents/{i['closed']}", "06_incident_card", 1150, 3000)
-        await shot(admin, "/thresholds", "08_thresholds", 1100)
-        await shot(admin, "/snmp", "09_snmp", 1200)
-        await shot(admin, "/users", "10_users", 900)
-        await shot(admin, "/events", "11_events", 1250)
-        await shot(admin, "/reports", "12_reports", 1300, 3500)
+        # висота знімків обмежена, щоб у звіті на сторінці вміщалося два рисунки
+        await shot(admin, "/", "02_dashboard", 1000)
+        await shot(admin, "/equipment", "03_equipment", 900)
+        await shot(admin, f"/equipment/{i['ups']}?period=7d", "04_equipment_card", 1050, 3500)
+        await shot(admin, "/incidents?status=all&days=7", "05_incidents", 900)
+        await shot(admin, f"/incidents/{i['closed']}", "06_incident_card", 900, 3000)
+        await shot(admin, "/thresholds", "08_thresholds", 900)
+        await shot(admin, "/snmp", "09_snmp", 950)
+        await shot(admin, "/users", "10_users", 800)
+        await shot(admin, "/events", "11_events", 900)
+        await shot(admin, "/reports", "12_reports", 1000, 3500)
         for n, key in enumerate(QUERIES, 1):
             await admin.set_viewport_size({"width": 1440, "height": 1800})
             await admin.goto(f"{BASE}/queries?q={key}&run=true")
@@ -84,8 +85,8 @@ async def main():
 
         support = await login(await browser.new_context(**opts), "a.koval", "Support#2026")
         if i["open"]:
-            await shot(support, f"/incidents/{i['open']}", "07_incident_open", 1000)
-        await shot(support, "/notifications", "13_notifications", 1000)
+            await shot(support, f"/incidents/{i['open']}", "07_incident_open", 900)
+        await shot(support, "/notifications", "13_notifications", 850)
         await shot(support, "/users", "14_access_denied", 900)
         await browser.close()
 

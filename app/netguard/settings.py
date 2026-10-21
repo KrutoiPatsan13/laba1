@@ -6,6 +6,8 @@ NETGUARD_STORAGE_SECRET секрет для підпису сесій веб-і�
 NETGUARD_WEB_PORT       порт веб-інтерфейсу (типово 8080)
 NETGUARD_SIM_FAULTS     несправності для емулятора SNMP-агентів, напр.
                         "SW-VYN-02=offline;UPS-TRO-01=battery_low"
+NETGUARD_SNMP_CONFIG    шлях до YAML-файлу конфігурації SNMP; Polling Service застосовує його
+                        під час старту та після кожної зміни (порожньо — лише вебінтерфейс і CLI)
 NETGUARD_NOTIFY_DRY_RUN 1 — e-mail і Telegram не надсилаються, а пишуться у var/outbox.log
 SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM — канал e-mail
 TELEGRAM_BOT_TOKEN      канал Telegram
@@ -29,6 +31,7 @@ class Settings:
     storage_secret: str = os.environ.get("NETGUARD_STORAGE_SECRET", "change-me-in-production")
     web_port: int = int(os.environ.get("NETGUARD_WEB_PORT", "8080"))
     sim_faults: str = os.environ.get("NETGUARD_SIM_FAULTS", "")
+    snmp_config: Path | None = Path(os.environ["NETGUARD_SNMP_CONFIG"]) if os.environ.get("NETGUARD_SNMP_CONFIG") else None
     notify_dry_run: bool = _bool("NETGUARD_NOTIFY_DRY_RUN", True)
     smtp_host: str = os.environ.get("SMTP_HOST", "")
     smtp_port: int = int(os.environ.get("SMTP_PORT", "587"))
