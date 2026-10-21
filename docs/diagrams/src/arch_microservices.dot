@@ -1,0 +1,42 @@
+digraph Architecture {
+  graph [rankdir=TB, splines=true, nodesep=0.45, ranksep=0.65, fontname="Liberation Sans", pad=0.25, newrank=true];
+  node  [fontname="Liberation Sans", fontsize=12];
+  edge  [fontname="Liberation Sans", fontsize=10, color="#404040", penwidth=1.1, arrowsize=0.8];
+
+  user  [shape=box, style="rounded,filled", fillcolor="#F2F2F2", label="Інженер, адміністратор\n(браузер)"];
+  snmp  [shape=box3d, style=filled, fillcolor="#F2F2F2", label="SNMP-агенти\nобладнання та ДБЖ"];
+  yaml  [shape=note, style=filled, fillcolor="#E4DFEC", label="snmp_config.yaml"];
+  chan  [shape=box3d, style=filled, fillcolor="#F2F2F2", label="SMTP-сервер,\nTelegram Bot API"];
+
+  subgraph cluster_ms {
+    label="Мікросервіси NetGuard Monitor — окремі процеси (контейнери)"; fontsize=11; style="dashed,rounded"; color="#7F7F7F";
+    web   [shape=box, style=filled, fillcolor="#E2EFDA", label="Web UI\nNiceGUI, порт 8080\nбез доступу до БД", width=2.2];
+    gw    [shape=box, style=filled, fillcolor="#DCE6F2", label="API Gateway / Auth\nFastAPI, порт 8081\nроль ng_web", width=2.2];
+    rep   [shape=box, style=filled, fillcolor="#DCE6F2", label="Reporting Service\nFastAPI, порт 8082\nроль ng_report", width=2.2];
+    poll  [shape=box, style=filled, fillcolor="#DCE6F2", label="Polling Service\nроль ng_poller", width=2.2];
+    alert [shape=box, style=filled, fillcolor="#DCE6F2", label="Alerting Service\nроль ng_alerting", width=2.2];
+    notif [shape=box, style=filled, fillcolor="#DCE6F2", label="Notification Service\nроль ng_notifier", width=2.2];
+  }
+
+  db [shape=cylinder, style=filled, fillcolor="#FFF2CC", color="#BF9000", penwidth=1.6, height=0.9, width=3.4,
+      label="PostgreSQL, схема netguard\nтригери · процедури · представлення · LISTEN/NOTIFY"];
+
+  user  -> web   [dir=both, label=" HTTPS,\n WebSocket"];
+  web   -> gw    [label=" REST + JWT"];
+  gw    -> rep   [label=" REST + JWT\n (звіти)"];
+  snmp  -> poll  [dir=both, label=" SNMP GET,\n UDP/161"];
+  yaml  -> poll  [label=" конфігурація"];
+  notif -> chan  [label=" e-mail,\n Telegram"];
+
+  gw    -> db [dir=both, label=" SQL"];
+  rep   -> db [dir=back, label=" SQL\n (читання)"];
+  poll  -> db [label=" показники,\n стан пристроїв"];
+  db    -> alert [style=dashed, label=" NOTIFY\n ng_incident"];
+  alert -> db [label=" ескалація"];
+  db    -> notif [style=dashed, label=" NOTIFY\n ng_notification"];
+  notif -> db [label=" стан\n доставки"];
+
+  { rank=same; user; snmp; yaml; chan; }
+  { rank=same; web; poll; notif; }
+  { rank=same; gw; rep; alert; }
+}

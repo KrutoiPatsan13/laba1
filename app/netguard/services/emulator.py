@@ -4,7 +4,7 @@
 частки градуса для MikroTik тощо): Polling Service множить їх на scale із шаблону
 snmp_oid_map, як і для справжнього SNMP. Значення мають добовий цикл і шум;
 несправності задаються змінною NETGUARD_SIM_FAULTS, напр.
-"SW-VYN-02=offline;UPS-TRO-01=battery_low".
+"SW-LUK-02=offline;UPS-TER-01=battery_low".
 
 Ті самі формули використовує скрипт demo_setup для генерування історії показників,
 тож графіки історії та живі дані не мають розриву.

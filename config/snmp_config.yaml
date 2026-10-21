@@ -70,9 +70,9 @@ devices:
     location: ЦОД
     profile: apc-symmetra-px
     credential: ups-v3
-  - name: UPS-OBL-01
+  - name: UPS-HOL-01
     ip: 10.1.0.10
-    location: Вузол Оболонь
+    location: Вузол Голосіїв
     profile: apc-symmetra-px
     credential: ups-v3
   - name: SW-DC-CORE-01
@@ -81,8 +81,8 @@ devices:
     profile: cisco-catalyst
     credential: net-v2c
     poll_interval_s: 30        # перевизначення значення за замовчуванням
-  - name: SW-OBL-01
+  - name: SW-HOL-01
     ip: 10.1.0.2
-    location: Вузол Оболонь
+    location: Вузол Голосіїв
     profile: cisco-catalyst
     credential: net-v2c

@@ -17,8 +17,8 @@ INSERT INTO roles (code, name, description) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO locations (name, location_type, address, description) VALUES
-    ('ЦОД',           'data_center', 'вул. Центральна, 1',      'Головний вузол провайдера'),
-    ('Вузол Оболонь', 'access_node', 'просп. Оболонський, 10',  'Районний вузол доступу')
+    ('ЦОД',            'data_center', 'вул. Предславинська, 28 (Печерський р-н)',  'Головний вузол провайдера'),
+    ('Вузол Голосіїв', 'access_node', 'просп. Голосіївський, 58 (Голосіївський р-н)', 'Районний вузол доступу')
 ON CONFLICT (name) DO NOTHING;
 
 -- Коди метрик збігаються з ключами profiles.*.metrics у YAML-файлі

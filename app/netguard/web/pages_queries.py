@@ -53,11 +53,11 @@ QUERIES = [
  ORDER BY i.opened_at DESC;"""),
     dict(key="history", group=SELECT, kind=SELECT, title="Історія заряду АКБ під час аварії живлення (агрегування)",
          note="Функція fn_metric_history групує показники за інтервалами (date_bin): видно розряд АКБ ДБЖ вузла "
-              "Троєщина під час відключення мережі та подальший заряд.",
+              "Теремки під час відключення мережі та подальший заряд.",
          sql="""SELECT bucket AS "Інтервал", round(avg_value::numeric, 1) AS "Середнє, %",
        min_value AS "Мін., %", max_value AS "Макс., %"
   FROM fn_metric_history(
-         (SELECT id FROM equipment WHERE name = 'UPS-TRO-01'), 'battery_charge',
+         (SELECT id FROM equipment WHERE name = 'UPS-TER-01'), 'battery_charge',
          date_trunc('day', now()) - INTERVAL '3 days' + INTERVAL '1 hour',
          date_trunc('day', now()) - INTERVAL '3 days' + INTERVAL '9 hours',
          INTERVAL '30 minutes');"""),
@@ -71,7 +71,7 @@ QUERIES = [
   CROSS JOIN LATERAL (SELECT value, read_at FROM metric_reading
                        WHERE equipment_id = e.id AND metric_id = m.id
                        ORDER BY read_at DESC LIMIT 1) r
- WHERE e.name = 'UPS-TRO-01'
+ WHERE e.name = 'UPS-TER-01'
  ORDER BY m.id;"""),
     dict(key="mtta", group="report", kind=SELECT, title="Інциденти, MTTA і MTTR за вузлами (fn_report_incidents)",
          note="MTTA — середній час до прийняття інциденту, MTTR — середній час до усунення.",
@@ -133,7 +133,7 @@ SELECT i.id AS "Інцидент", i.status AS "Статус", i.metric_value AS
               "і відкриває інцидент недоступності (SR-04.2). Транзакцію відкочено.",
          sql="""DO $$
 DECLARE
-    eq INTEGER := (SELECT id FROM equipment WHERE name = 'SW-POZ-01');
+    eq INTEGER := (SELECT id FROM equipment WHERE name = 'SW-PEC-01');
 BEGIN
     FOR attempt IN 1..3 LOOP              -- пристрій тричі поспіль не відповів
         CALL sp_register_poll_failure(eq);
@@ -144,7 +144,7 @@ SELECT e.name AS "Пристрій", e.status AS "Стан", e.failed_polls AS "
        i.id AS "Інцидент", i.incident_type AS "Тип", i.status AS "Статус інциденту"
   FROM equipment e
   LEFT JOIN incident i ON i.equipment_id = e.id AND i.opened_at = now()
- WHERE e.name = 'SW-POZ-01';"""),
+ WHERE e.name = 'SW-PEC-01';"""),
     dict(key="ack", group=LOGIC, kind=LOGIC, title="Процедура: прийняття інциденту в роботу",
          note="sp_acknowledge_incident блокує рядок інциденту, перевіряє статус і користувача, фіксує час і "
               "відповідального; тригер записує перехід у журнал подій. Транзакцію відкочено.",
@@ -181,16 +181,16 @@ SELECT login AS "Логін", left(password_hash, 29) || '…' AS "Хеш пар
     dict(key="check", group=ERROR, kind=ERROR, title="CHECK: інтервал опитування поза межами 10–60 с",
          note="Обмеження ck_equipment_interval (FR-04: не рідше ніж раз на 60 с).",
          sql="""UPDATE equipment SET poll_interval_s = 5
- WHERE name = 'SW-OBL-01';"""),
+ WHERE name = 'SW-HOL-01';"""),
     dict(key="unique", group=ERROR, kind=ERROR, title="Частковий унікальний індекс: IP активного пристрою",
          note="uq_equipment_ip — IP-адреса унікальна серед активних пристроїв.",
          sql="""INSERT INTO equipment (type_id, location_id, name, ip_address, credential_id)
 SELECT type_id, location_id, 'SW-TEST-01', ip_address, credential_id
   FROM equipment
- WHERE name = 'SW-OBL-01';"""),
+ WHERE name = 'SW-HOL-01';"""),
     dict(key="fk", group=ERROR, kind=ERROR, title="FK RESTRICT: видалення вузла, де встановлено обладнання",
          note="fk_equipment_location з правилом ON DELETE RESTRICT.",
-         sql="""DELETE FROM locations WHERE name = 'Вузол Оболонь';"""),
+         sql="""DELETE FROM locations WHERE name = 'Вузол Голосіїв';"""),
     dict(key="transition", group=ERROR, kind=ERROR, title="Тригер: недопустимий перехід статусу інциденту",
          note="Тригер incident_validate дозволяє лише переходи діаграми станів (new → escalated → acknowledged → "
               "resolved → closed).",

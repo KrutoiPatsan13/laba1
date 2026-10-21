@@ -55,21 +55,29 @@ Python, що з нею працює: сервіси опитування, ана
 | `fn_create_partitions`, `fn_drop_old_partitions` | обслуговування секцій телеметрії |
 | ролі `ng_web`, `ng_poller`, `ng_alerting`, `ng_notifier`, `ng_report` | найменші привілеї для кожного сервісу |
 
-## Програмний продукт (`app/netguard`)
+## Програмний продукт (`app/netguard`) — мікросервіси
 
-| Модуль | Запуск | Що робить |
-|---|---|---|
-| Polling Service | `python -m netguard.services.poller` | читає план опитування, опитує пристрої (емулятор SNMP-агентів), пише показники |
-| Alerting Service | `python -m netguard.services.alerting` | ескалація прострочених інцидентів, журнал аварій |
-| Notification Service | `python -m netguard.services.notifier` | доставляє сповіщення з черги (веб, e-mail, Telegram) |
-| Веб-інтерфейс | `python -m netguard.web` | панель моніторингу, обладнання, інциденти, звіти, адміністрування, запити до БД |
-| Усе разом | `python -m netguard` | запускає всі сервіси окремими процесами |
+Архітектура відповідає ЛР2 ТСПП: кожна функція — окремий сервіс (процес або контейнер) зі своєю
+роллю СУБД; сервіси не викликають код один одного. Web UI до БД не підключається й отримує дані лише
+від API Gateway за REST з токеном JWT; API Gateway маршрутизує запити звітів до Reporting Service;
+фонові сервіси обмінюються подіями через БД (`LISTEN/NOTIFY`). Схема — `docs/diagrams/arch_microservices.png`.
+
+| Сервіс | Запуск | Порт | Роль СУБД | Що робить |
+|---|---|---|---|---|
+| Web UI | `python -m netguard.web` | 8080 | — | сторінки інтерфейсу (NiceGUI): моніторинг, обладнання, інциденти, звіти, адміністрування, запити до БД |
+| API Gateway / Auth Service | `python -m netguard.gateway` | 8081 | `ng_web` | вхід і токени JWT, перевірка ролей, REST API для Web UI (`/docs` — опис OpenAPI), маршрутизація звітів |
+| Reporting Service | `python -m netguard.reporting` | 8082 | `ng_report` | звіти за період, файли Excel, PDF, CSV |
+| Polling Service | `python -m netguard.services.poller` | — | `ng_poller` | читає план опитування, опитує пристрої (емулятор SNMP-агентів), пише показники, застосовує YAML-файл |
+| Alerting Service | `python -m netguard.services.alerting` | — | `ng_alerting` | ескалація прострочених інцидентів, журнал аварій |
+| Notification Service | `python -m netguard.services.notifier` | — | `ng_notifier` | доставляє сповіщення з черги (веб, e-mail, Telegram) |
+| Усе разом | `python -m netguard` | | | запускає всі шість сервісів окремими процесами |
 | Демо-дані | `python -m netguard.demo_setup --reset` | схема, логіка, довідники, користувачі, 2 версії YAML, історія за 7 діб |
 | Обслуговування | `python -m netguard.maintenance partitions\|backup\|restore` | секції телеметрії (наперед і видалення старших за 6 місяців), резервна копія `pg_dump` і відновлення; запускати за розкладом від імені власника схеми |
 
 Інтерфейс написано на Python бібліотекою NiceGUI: вона перетворює Python-код на веб-сторінки
-(Vue/Quasar у браузері) і працює поверх FastAPI. Брокер повідомлень із ЛР2 ТСПП (RabbitMQ)
-замінено механізмом `LISTEN/NOTIFY` PostgreSQL: БД сама будить сервіси, окремий брокер не потрібен.
+(Vue/Quasar у браузері). API Gateway і Reporting Service — FastAPI. Брокер повідомлень із ЛР2 ТСПП
+(RabbitMQ) замінено механізмом `LISTEN/NOTIFY` PostgreSQL: сигнал надходить після фіксації
+транзакції, а самі повідомлення лежать у таблицях, тож окремий брокер не потрібен.
 
 ### Запуск
 
@@ -78,18 +86,35 @@ cd app
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 export NETGUARD_DSN="host=localhost dbname=netguard user=postgres"   # власник схеми netguard
-export NETGUARD_STORAGE_SECRET="довгий-випадковий-рядок"
+export NETGUARD_STORAGE_SECRET="довгий-випадковий-рядок"         # сеанси Web UI
+export NETGUARD_JWT_SECRET="інший-довгий-випадковий-рядок"         # токени API Gateway і Reporting Service
 python -m netguard.demo_setup --reset            # або розгортання БД вручну (нижче)
 export NETGUARD_SNMP_CONFIG=../config/snmp_config.demo.yaml   # необов'язково: Polling Service застосовує файл після змін
-NETGUARD_SIM_FAULTS="SW-VYN-02=offline;UPS-TRO-01=battery_low" python -m netguard
+NETGUARD_SIM_FAULTS="SW-LUK-02=offline;UPS-TER-01=battery_low" python -m netguard
 # веб-інтерфейс: http://localhost:8080
 ```
 
 Демонстраційні облікові записи: `admin` / `Admin#2026` (адміністратор),
 `a.koval` / `Support#2026` (сапорт). Інші змінні середовища описано в `app/netguard/settings.py`;
 без `SMTP_HOST` і `TELEGRAM_BOT_TOKEN` сповіщення e-mail і Telegram пишуться у `var/outbox.log`.
-Сторінка «Запити до БД» перемикає ролі СУБД (`SET LOCAL ROLE`), тому обліковий запис
-`NETGUARD_DSN` має бути власником схеми або членом ролей `ng_*`.
+Сторінка «Запити до БД» (запити виконує API Gateway) перемикає ролі СУБД (`SET LOCAL ROLE`), тому
+обліковий запис `NETGUARD_DSN` має бути власником схеми або членом ролей `ng_*`.
+
+### Запуск у Docker
+
+```bash
+cp .env.example .env          # задати паролі й секрети
+docker compose up -d --build  # PostgreSQL + шість сервісів; веб-інтерфейс: http://localhost:8080
+```
+
+Під час першого старту контейнер БД виконує `sql/schema.sql`, `sql/lr2_logic.sql` і
+`sql/seed_reference.sql`; Polling Service застосовує змонтований `config/snmp_config.yaml`.
+Перший обліковий запис адміністратора:
+
+```bash
+docker compose run --rm -e NETGUARD_ADMIN_PASSWORD='...' gateway \
+  python -m netguard.maintenance create-admin --login admin --name "Прізвище Ім'я"
+```
 
 ## Зв'язок БД з YAML-конфігурацією SNMP
 

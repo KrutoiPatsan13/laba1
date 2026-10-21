@@ -1,4 +1,4 @@
-"""Reporting Service: звіти за період (FR-10, SR-10.1) та їх експорт у Excel, PDF і CSV.
+"""Побудова звітів Reporting Service (FR-10, SR-10.1) та їх експорт у Excel, PDF і CSV.
 
 Агрегати рахує БД (функції fn_report_uptime, fn_report_incidents, fn_report_ups_battery) —
 звіт читає готові дані окремою транзакцією лише для читання, не блокуючи запис телеметрії.

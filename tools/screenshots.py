@@ -25,10 +25,10 @@ def ids() -> dict:
         c.execute("SET search_path TO netguard")
         q = lambda sql: c.execute(sql).fetchone()[0]  # noqa: E731
         return {
-            "ups": q("SELECT id FROM equipment WHERE name = 'UPS-TRO-01'"),
+            "ups": q("SELECT id FROM equipment WHERE name = 'UPS-TER-01'"),
             "closed": q("SELECT i.id FROM incident i JOIN threshold t ON t.id = i.threshold_id JOIN metric m"
                         " ON m.id = t.metric_id JOIN equipment e ON e.id = i.equipment_id"
-                        " WHERE e.name = 'UPS-TRO-01' AND m.code = 'battery_charge' AND i.status = 'closed'"),
+                        " WHERE e.name = 'UPS-TER-01' AND m.code = 'battery_charge' AND i.status = 'closed'"),
             "open": q("SELECT id FROM incident WHERE status IN ('new', 'escalated')"
                       " ORDER BY incident_type = 'threshold' DESC, opened_at DESC LIMIT 1"),
         }

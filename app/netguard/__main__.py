@@ -1,8 +1,11 @@
-"""Запуск усіх сервісів NetGuard Monitor окремими процесами (аналог docker compose up).
+"""Запуск усіх мікросервісів NetGuard Monitor окремими процесами (аналог docker compose up).
 
-    python -m netguard                  # Polling, Alerting, Notification Service і веб-інтерфейс
+    python -m netguard                  # усі сервіси
     python -m netguard poller notifier  # лише вказані сервіси
 
+Сервіси: poller (Polling Service), alerting (Alerting Service), notifier (Notification Service),
+reporting (Reporting Service, :8082), gateway (API Gateway / Auth Service, :8081),
+web (Web UI, :8080). Кожен — окремий процес зі своєю роллю СУБД; Web UI до БД не підключається.
 Ctrl+C зупиняє всі процеси.
 """
 import signal
@@ -14,6 +17,8 @@ SERVICES = {
     "poller": "netguard.services.poller",
     "alerting": "netguard.services.alerting",
     "notifier": "netguard.services.notifier",
+    "reporting": "netguard.reporting",
+    "gateway": "netguard.gateway",
     "web": "netguard.web",
 }
 

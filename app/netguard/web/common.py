@@ -1,13 +1,13 @@
-"""Спільні елементи веб-інтерфейсу: каркас сторінки, меню за ролями, довідники підписів."""
+"""Спільні елементи веб-інтерфейсу: каркас сторінки, меню за ролями, довідники підписів,
+форматування значень, що надходять від API Gateway у JSON."""
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from ipaddress import IPv4Address, IPv6Address
 
 from nicegui import app, ui
 
-from ..db import Database
-
-db = Database("ng_web")
+from . import api
 
 EQ_STATUS = {"online": ("Онлайн", "positive"), "offline": ("Офлайн", "negative"),
              "unknown": ("Невідомо", "grey-6"), "maintenance": ("Обслуговування", "warning")}
@@ -48,9 +48,24 @@ def uid() -> int:
     return app.storage.user["id"]
 
 
+ISO_DT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:\d{2}|Z)?")
+ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def dt(v) -> datetime | date | None:
+    """Момент часу з JSON (рядок ISO 8601) → datetime/date; інші значення — без змін."""
+    if isinstance(v, str):
+        if ISO_DT.fullmatch(v):
+            return datetime.fromisoformat(v.replace("Z", "+00:00"))
+        if ISO_DATE.fullmatch(v):
+            return date.fromisoformat(v)
+    return v
+
+
 def fmt_dt(v, seconds=False) -> str:
     if v is None:
         return "—"
+    v = dt(v)
     if isinstance(v, datetime):
         return v.strftime("%d.%m.%Y %H:%M:%S" if seconds else "%d.%m.%Y %H:%M")
     if isinstance(v, date):
@@ -58,10 +73,11 @@ def fmt_dt(v, seconds=False) -> str:
     return str(v)
 
 
-def fmt_td(v: timedelta | None) -> str:
+def fmt_td(v: timedelta | float | int | None) -> str:
+    """Тривалість: timedelta або кількість секунд (так API передає INTERVAL)."""
     if v is None:
         return "—"
-    s = int(v.total_seconds())
+    s = int(v.total_seconds() if isinstance(v, timedelta) else float(v))
     d, s = divmod(s, 86400)
     h, s = divmod(s, 3600)
     m, s = divmod(s, 60)
@@ -77,7 +93,9 @@ def fmt_num(v, digits=1) -> str:
 
 
 def jsonable(value):
-    """Значення з БД → JSON для таблиць і графіків NiceGUI."""
+    """Значення з відповіді API → дані для таблиць NiceGUI: моменти часу у вигляді «дд.мм.рррр гг:хв»."""
+    if isinstance(value, str) and (ISO_DT.fullmatch(value) or ISO_DATE.fullmatch(value)):
+        return fmt_dt(value)
     if isinstance(value, dict):
         return {k: jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -113,8 +131,10 @@ async def frame(title: str, subtitle: str | None = None):
               negative="#d62828", warning="#f4a261", info="#4d7ea8")
     ui.query("body").style("background-color: #f4f6f9")
     u = user()
-    unread = await db.one("SELECT count(*) AS n FROM notification WHERE user_id = %s AND channel = 'web'"
-                          " AND created_at > now() - INTERVAL '24 hours'", (u["id"],))
+    try:
+        unread = (await api.get("/api/notifications/unread-count"))["count"]
+    except api.ApiError:
+        unread = 0
     with ui.header().classes("items-center justify-between bg-primary px-4 py-2"):
         with ui.row().classes("items-center gap-2"):
             ui.button(icon="menu", on_click=lambda: drawer.toggle()).props("flat round color=white")
@@ -124,8 +144,8 @@ async def frame(title: str, subtitle: str | None = None):
         with ui.row().classes("items-center gap-3"):
             with ui.button(icon="notifications", on_click=lambda: ui.navigate.to("/notifications")) \
                     .props("flat round color=white"):
-                if unread["n"]:
-                    ui.badge(str(unread["n"]), color="negative").props("floating")
+                if unread:
+                    ui.badge(str(unread), color="negative").props("floating")
             with ui.column().classes("gap-0 items-end"):
                 ui.label(u["name"]).classes("text-sm font-medium")
                 ui.label(ROLE.get(u["role"], u["role"])).classes("text-xs opacity-70")

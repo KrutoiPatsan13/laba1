@@ -1,10 +1,13 @@
-"""Звіти за період (FR-10) з експортом у Excel, PDF і CSV."""
+"""Звіти за період (FR-10) з експортом у Excel, PDF і CSV.
+
+Дані й файли формує Reporting Service; сторінка звертається до нього через API Gateway.
+"""
 from datetime import date, datetime, time, timedelta
 
 from nicegui import ui
 
-from .. import reports as rp
-from .common import db, frame
+from . import api
+from .common import frame
 
 
 @ui.page("/reports")
@@ -12,7 +15,7 @@ async def reports_page():
     await frame("Звіти", "Доступність обладнання, статистика інцидентів (MTTA, MTTR) і стан АКБ ДБЖ за обраний період")
     today = date.today()
     flt = {"from": str(today - timedelta(days=7)), "to": str(today)}
-    state: dict = {"reports": [], "period": ""}
+    state: dict = {"reports": [], "params": {}}
 
     def period():
         f = datetime.combine(date.fromisoformat(flt["from"]), time.min).astimezone()
@@ -26,40 +29,47 @@ async def reports_page():
         if f >= t:
             ui.label("Початок періоду має бути раніше за кінець").classes("text-negative")
             return
-        state["reports"] = await rp.build(db, f, t)
-        state["period"] = rp.period_title(f, t)
+        state["params"] = {"from": f.isoformat(), "to": t.isoformat()}
+        try:
+            data = await api.get("/api/reports", state["params"])
+        except api.ApiError as e:
+            state["reports"] = []
+            ui.label(f"Звіти недоступні: {e.message}").classes("text-negative")
+            return
+        state["reports"] = data["reports"]
         up, inc, ups = state["reports"]
         with ui.row().classes("w-full gap-4 items-stretch"):
-            avg = sum(r[4] for r in up.rows) / len(up.rows) if up.rows else 0
-            worst = min(up.rows, key=lambda r: r[4]) if up.rows else None
-            total = sum(r[2] for r in inc.rows)
+            avg = sum(r[4] for r in up["rows"]) / len(up["rows"]) if up["rows"] else 0
+            worst = min(up["rows"], key=lambda r: r[4]) if up["rows"] else None
+            total = sum(r[2] for r in inc["rows"])
             for title, value, hint in [("Середня доступність", f"{avg:.2f} %", f"найнижча: {worst[0]} — {worst[4]} %" if worst else ""),
                                        ("Інцидентів за період", str(total),
-                                        f"критичних: {sum(r[3] for r in inc.rows)}, недоступність: {sum(r[4] for r in inc.rows)}"),
-                                       ("ДБЖ під контролем", str(len(ups.rows)),
-                                        f"мін. заряд за період: {min((r[6] for r in ups.rows if r[6] is not None), default='—')} %")]:
+                                        f"критичних: {sum(r[3] for r in inc['rows'])}, недоступність: {sum(r[4] for r in inc['rows'])}"),
+                                       ("ДБЖ під контролем", str(len(ups["rows"])),
+                                        f"мін. заряд за період: {min((r[6] for r in ups['rows'] if r[6] is not None), default='—')} %")]:
                 with ui.card().classes("flex-1 p-4"):
                     ui.label(title).classes("text-sm text-grey-7")
                     ui.label(value).classes("text-2xl font-bold text-primary")
                     ui.label(hint).classes("text-xs text-grey-7")
         with ui.tabs().classes("w-full") as tabs:
-            tab_objs = [ui.tab(r.key, label=r.title) for r in state["reports"]]
+            tab_objs = [ui.tab(r["key"], label=r["title"]) for r in state["reports"]]
         with ui.tab_panels(tabs, value=tab_objs[0]).classes("w-full"):
             for rep, tab in zip(state["reports"], tab_objs):
                 with ui.tab_panel(tab):
-                    if rep.key == "incidents" and rep.rows:
+                    rows_ = rep["rows"]
+                    if rep["key"] == "incidents" and rows_:
                         ui.echart({"grid": {"left": 120, "right": 30, "top": 30, "bottom": 30},
                                    "legend": {"top": 0}, "tooltip": {"trigger": "axis"},
                                    "xAxis": {"type": "value"},
-                                   "yAxis": {"type": "category", "data": [f"{r[0]} / {r[1]}" for r in rep.rows]},
+                                   "yAxis": {"type": "category", "data": [f"{r[0]} / {r[1]}" for r in rows_]},
                                    "series": [{"name": "Попередження та інші", "type": "bar", "stack": "a",
-                                               "color": "#f4a261", "data": [r[2] - r[3] - r[4] for r in rep.rows]},
+                                               "color": "#f4a261", "data": [r[2] - r[3] - r[4] for r in rows_]},
                                               {"name": "Критичні", "type": "bar", "stack": "a", "color": "#d62828",
-                                               "data": [r[3] for r in rep.rows]},
+                                               "data": [r[3] for r in rows_]},
                                               {"name": "Недоступність", "type": "bar", "stack": "a", "color": "#6c757d",
-                                               "data": [r[4] for r in rep.rows]}]}).classes("w-full h-72")
-                    if rep.key == "uptime" and rep.rows:
-                        low = sorted(rep.rows, key=lambda r: r[4])[:10]
+                                               "data": [r[4] for r in rows_]}]}).classes("w-full h-72")
+                    if rep["key"] == "uptime" and rows_:
+                        low = sorted(rows_, key=lambda r: r[4])[:10]
                         ui.echart({"grid": {"left": 110, "right": 40, "top": 10, "bottom": 30},
                                    "tooltip": {}, "xAxis": {"type": "value", "min": round(min(r[4] for r in low) - 0.1, 1),
                                                             "max": 100},
@@ -67,21 +77,22 @@ async def reports_page():
                                    "series": [{"type": "bar", "color": "#2a9d8f", "data": [r[4] for r in low],
                                                "label": {"show": True, "position": "right"}}]}).classes("w-full h-64")
                     cols = [{"name": str(i), "label": h, "field": str(i), "align": "left", "sortable": True}
-                            for i, h in enumerate(rep.headers)]
+                            for i, h in enumerate(rep["headers"])]
                     rows = [{str(i): ("—" if v is None else v) for i, v in enumerate(r)} | {"_k": n}
-                            for n, r in enumerate(rep.rows)]
+                            for n, r in enumerate(rows_)]
                     ui.table(columns=cols, rows=rows, row_key="_k", pagination=10).classes("w-full")
-                    ui.button("CSV цього звіту", icon="download", on_click=lambda rep=rep: ui.download.content(
-                        rp.to_csv(rep), f"netguard_{rep.key}.csv", "text/csv")).props("flat")
+                    ui.button("CSV цього звіту", icon="download",
+                              on_click=lambda rep=rep: export("csv", rep["key"])).props("flat")
 
-    def export(fmt: str):
+    async def export(fmt: str, key: str | None = None):
         if not state["reports"]:
             return
-        if fmt == "xlsx":
-            ui.download.content(rp.to_xlsx(state["reports"], state["period"]), "netguard_report.xlsx",
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            ui.download.content(rp.to_pdf(state["reports"], state["period"]), "netguard_report.pdf", "application/pdf")
+        try:
+            body, name, media = await api.download("/api/reports/export", state["params"] | {"fmt": fmt, "key": key})
+        except api.ApiError as e:
+            ui.notify(f"Файл не сформовано: {e.message}", type="negative")
+            return
+        ui.download.content(body, name, media)
 
     def preset(days: int):
         flt.update({"from": str(today - timedelta(days=days)), "to": str(today)})

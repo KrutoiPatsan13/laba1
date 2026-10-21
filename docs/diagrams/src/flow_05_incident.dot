@@ -8,7 +8,7 @@ digraph flow_05_incident {
   n4 [shape=box, label=<Кнопка<BR/>«Прийняти в роботу»>];
   n5 [shape=box, label=<Кнопка<BR/>«Позначити усунутим»>];
   n6 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Кнопка «Закрити» і коментар>, margin="0.06,0.03"];
-  n7 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">CALL sp_acknowledge_incident /<BR/>sp_resolve_incident / sp_close_incident</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n7 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">API Gateway: CALL sp_acknowledge_incident /<BR/>sp_resolve_incident / sp_close_incident</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
   n8 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Перевірки БД<BR/>пройдено?>, margin="0.02,0.02"];
   n9 [shape=box, label=<COMMIT; тригер пише<BR/>перехід у журнал подій>];
   n10 [shape=box, label=<ROLLBACK;<BR/>повідомлення про помилку>];

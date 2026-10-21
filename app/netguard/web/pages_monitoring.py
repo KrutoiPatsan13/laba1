@@ -1,11 +1,14 @@
-"""Панель моніторингу (FR-05), облік обладнання (FR-02, FR-03) і графіки показників (FR-12)."""
-from datetime import datetime, timedelta
+"""Панель моніторингу (FR-05), облік обладнання (FR-02, FR-03) і графіки показників (FR-12).
+
+Дані й зміни — через API Gateway (/api/dashboard, /api/reference, /api/equipment).
+"""
+from datetime import date
 
 from nicegui import ui
 
-from ..db import error_text
-from .common import (CATEGORY, EQ_STATUS, INC_STATUS, SEVERITY, admin_only, badge, badge_slot, db, fmt_dt,
-                     fmt_num, frame, is_admin, jsonable, stat_card, uid)
+from . import api
+from .common import (CATEGORY, EQ_STATUS, INC_STATUS, SEVERITY, badge, badge_slot, dt, fmt_dt, fmt_num, frame,
+                     is_admin, stat_card)
 
 UNITS = {"battery_charge": "%", "battery_temperature": "°C", "battery_runtime": "хв", "battery_voltage": "В",
          "input_voltage": "В", "output_voltage": "В", "output_load": "%", "cpu_load": "%", "temperature": "°C",
@@ -36,7 +39,7 @@ def device_rows(rows: list[dict]) -> list[dict]:
             "id": r["id"], "name": r["name"], "ip": r["ip"], "type": CATEGORY.get(r["category"], r["category"]),
             "status_label": label if r["is_active"] else "Виведено", "status_color": color if r["is_active"] else "grey-5",
             "metrics": " · ".join(metric_str(c, lv.get(c)) for c in KEY_METRICS.get(r["category"], []) if c in lv) or "—",
-            "last_seen": r["last_seen_at"].strftime("%H:%M:%S") if r["last_seen_at"] else "—",
+            "last_seen": dt(r["last_seen_at"]).strftime("%H:%M:%S") if r["last_seen_at"] else "—",
             "incidents": r["open_incidents"] or "",
             "location": r["location"],
         })
@@ -61,17 +64,12 @@ async def dashboard():
 
     @ui.refreshable
     async def body():
-        s = await db.one(
-            "SELECT count(*) FILTER (WHERE is_active) total,"
-            " count(*) FILTER (WHERE is_active AND status = 'online') online,"
-            " count(*) FILTER (WHERE is_active AND status = 'offline') offline,"
-            " (SELECT count(*) FROM incident WHERE status IN ('new', 'escalated', 'acknowledged')) open_inc,"
-            " (SELECT count(*) FROM v_incident_list WHERE status IN ('new', 'escalated', 'acknowledged')"
-            "                                         AND severity = 'critical') critical,"
-            " (SELECT count(*) FROM incident WHERE status = 'escalated') escalated,"
-            " (SELECT min((last_values ->> 'battery_charge')::NUMERIC) FROM v_equipment_current_state"
-            "   WHERE category = 'ups' AND is_active) min_charge"
-            " FROM equipment")
+        try:
+            data = await api.get("/api/dashboard")
+        except api.ApiError as e:
+            ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+            return
+        s, rows, incidents = data["summary"], data["devices"], data["incidents"]
         with ui.row().classes("w-full gap-4"):
             stat_card("check_circle", "пристроїв на зв'язку", f"{s['online']} / {s['total']}", "positive")
             stat_card("cloud_off", "пристроїв офлайн", str(s["offline"]), "negative" if s["offline"] else "grey-7")
@@ -81,9 +79,6 @@ async def dashboard():
                       f"{fmt_num(s['min_charge'])} %" if s["min_charge"] is not None else "—",
                       "negative" if (s["min_charge"] or 100) < 50 else "positive")
 
-        rows = await db.all("SELECT * FROM v_equipment_current_state WHERE is_active ORDER BY location, name")
-        incidents = await db.all(
-            "SELECT * FROM v_incident_list WHERE status IN ('new', 'escalated', 'acknowledged') ORDER BY opened_at DESC LIMIT 8")
         with ui.row().classes("w-full gap-4 items-start no-wrap max-lg:flex-wrap"):
             with ui.column().classes("flex-[3] gap-4 min-w-0"):
                 by_loc = {}
@@ -129,18 +124,21 @@ async def dashboard():
 @ui.page("/equipment")
 async def equipment_list():
     await frame("Обладнання", "Мережеве обладнання та ДБЖ; клацніть рядок, щоб відкрити картку пристрою з графіками")
-    refs = await reference_lists()
+    try:
+        refs = await reference_lists()
+    except api.ApiError as e:
+        ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+        return
     flt = {"location": None, "category": None, "status": None, "q": ""}
 
     @ui.refreshable
     async def table():
-        rows = await db.all(
-            "SELECT s.*, e.poll_interval_s, e.config_id, e.model FROM v_equipment_current_state s"
-            " JOIN equipment e ON e.id = s.id"
-            " WHERE (%(loc)s::int IS NULL OR s.location_id = %(loc)s) AND (%(cat)s::text IS NULL OR s.category::text = %(cat)s)"
-            "   AND (%(st)s::text IS NULL OR (CASE WHEN s.is_active THEN s.status::text ELSE 'retired' END) = %(st)s)"
-            "   AND s.name ILIKE %(q)s ORDER BY s.location, s.name",
-            {"loc": flt["location"], "cat": flt["category"], "st": flt["status"], "q": f"%{flt['q']}%"})
+        try:
+            rows = await api.get("/api/equipment", {"location_id": flt["location"], "category": flt["category"],
+                                                    "status": flt["status"], "q": flt["q"]})
+        except api.ApiError as e:
+            ui.label(f"Дані недоступні: {e.message}").classes("text-negative")
+            return
         data = device_rows(rows)
         for d, r in zip(data, rows):
             d.update(location=r["location"], interval=f"{r['poll_interval_s']} с", model=r["model"] or "—",
@@ -174,13 +172,11 @@ async def equipment_list():
 
 
 async def reference_lists() -> dict:
-    loc = await db.all("SELECT id, name FROM locations ORDER BY name")
-    types = await db.all("SELECT id, name, category FROM equipment_type WHERE name NOT LIKE '~%%' ORDER BY name")
-    creds = await db.all("SELECT id, name, snmp_version FROM snmp_credential ORDER BY name")
-    return {"locations": {r["id"]: r["name"] for r in loc},
-            "types": {r["id"]: f"{r['name']} ({CATEGORY[r['category']]})" for r in types},
-            "ups_types": {r["id"]: r["name"] for r in types if r["category"] == "ups"},
-            "credentials": {r["id"]: f"{r['name']} (SNMP {r['snmp_version']})" for r in creds}}
+    ref = await api.get("/api/reference")
+    return {"locations": {r["id"]: r["name"] for r in ref["locations"]},
+            "types": {r["id"]: f"{r['name']} ({CATEGORY[r['category']]})" for r in ref["types"]},
+            "ups_types": {r["id"]: r["name"] for r in ref["types"] if r["category"] == "ups"},
+            "credentials": {r["id"]: f"{r['name']} (SNMP {r['snmp_version']})" for r in ref["credentials"]}}
 
 
 def equipment_dialog(refs: dict, on_saved, eq: dict | None = None):
@@ -204,23 +200,17 @@ def equipment_dialog(refs: dict, on_saved, eq: dict | None = None):
             installed = ui.input("Дата встановлення", value=str(eq.get("installed_on") or "")).props("outlined type=date")
 
         async def save():
-            params = {"name": name.value.strip(), "ip": ip.value.strip(), "type": type_id.value, "loc": loc.value,
-                      "cred": cred.value, "port": int(port.value or 161), "int": int(interval.value or 60),
-                      "model": model.value.strip() or None, "serial": serial.value.strip() or None,
-                      "inst": installed.value or None, "id": eq.get("id")}
+            body = {"name": name.value.strip(), "ip": ip.value.strip(), "type_id": type_id.value, "location_id": loc.value,
+                    "credential_id": cred.value, "snmp_port": int(port.value or 161),
+                    "poll_interval_s": int(interval.value or 60), "model": model.value.strip() or None,
+                    "serial_number": serial.value.strip() or None, "installed_on": installed.value or None}
             try:
                 if eq.get("id"):
-                    await db.run("UPDATE equipment SET name = %(name)s, ip_address = %(ip)s, type_id = %(type)s,"
-                                 " location_id = %(loc)s, credential_id = %(cred)s, snmp_port = %(port)s,"
-                                 " poll_interval_s = %(int)s, model = %(model)s, serial_number = %(serial)s,"
-                                 " installed_on = %(inst)s WHERE id = %(id)s", params, user_id=uid())
+                    await api.put(f"/api/equipment/{eq['id']}", body)
                 else:
-                    await db.run("INSERT INTO equipment (name, ip_address, type_id, location_id, credential_id, snmp_port,"
-                                 " poll_interval_s, model, serial_number, installed_on) VALUES (%(name)s, %(ip)s, %(type)s,"
-                                 " %(loc)s, %(cred)s, %(port)s, %(int)s, %(model)s, %(serial)s, %(inst)s)", params,
-                                 user_id=uid())
-            except Exception as e:
-                ui.notify(f"Не збережено: {error_text(e)}", type="negative", multi_line=True)
+                    await api.post("/api/equipment", body)
+            except api.ApiError as e:
+                ui.notify(f"Не збережено: {e.message}", type="negative", multi_line=True)
                 return
             ui.notify("Збережено", type="positive")
             dlg.close()
@@ -252,13 +242,14 @@ def ups_dialog(refs: dict, on_saved):
 
         async def save():
             try:
-                await db.run("SELECT fn_register_ups(%s::smallint, %s, %s, %s::inet, %s::smallint, %s, %s, %s, %s::smallint,"
-                             " %s, %s, NULL, %s)",
-                             (type_id.value, loc.value, name.value.strip(), ip.value.strip(), cred.value,
-                              int(va.value or 0), ah.value, int(w.value) if w.value else None, int(cnt.value or 1),
-                              volt.value, model.value.strip() or None, bdate.value or None), user_id=uid())
-            except Exception as e:
-                ui.notify(f"ДБЖ не зареєстровано: {error_text(e)}", type="negative", multi_line=True)
+                await api.post("/api/equipment/ups", {
+                    "type_id": type_id.value, "location_id": loc.value, "name": name.value.strip(), "ip": ip.value.strip(),
+                    "credential_id": cred.value, "rated_power_va": int(va.value or 0), "battery_capacity_ah": ah.value,
+                    "rated_power_w": int(w.value) if w.value else None, "battery_count": int(cnt.value or 1),
+                    "nominal_voltage_v": volt.value, "model": model.value.strip() or None,
+                    "battery_installed_on": bdate.value or None})
+            except api.ApiError as e:
+                ui.notify(f"ДБЖ не зареєстровано: {e.message}", type="negative", multi_line=True)
                 return
             ui.notify("ДБЖ зареєстровано", type="positive")
             dlg.close()
@@ -271,21 +262,15 @@ def ups_dialog(refs: dict, on_saved):
 
 
 # ---------------------------------------------------------------------------- картка пристрою
-PERIODS = {"6h": ("6 годин", timedelta(hours=6), "2 minutes"), "24h": ("24 години", timedelta(days=1), "10 minutes"),
-           "7d": ("7 діб", timedelta(days=7), "1 hour")}
+PERIODS = {"6h": "6 годин", "24h": "24 години", "7d": "7 діб"}   # тривалість і крок агрегування задає API Gateway
 
 
 @ui.page("/equipment/{eq_id}")
 async def equipment_card(eq_id: int, period: str = "24h"):
-    eq = await db.one(
-        "SELECT e.*, host(e.ip_address) AS ip, t.name AS type_name, t.category, t.snmp_profile, l.name AS location,"
-        " c.name AS credential, c.snmp_version, u.rated_power_va, u.rated_power_w, u.battery_capacity_ah,"
-        " u.battery_count, u.nominal_voltage_v, u.battery_installed_on"
-        " FROM equipment e JOIN equipment_type t ON t.id = e.type_id JOIN locations l ON l.id = e.location_id"
-        " JOIN snmp_credential c ON c.id = e.credential_id LEFT JOIN ups_details u ON u.equipment_id = e.id"
-        " WHERE e.id = %s", (eq_id,))
-    if not eq:
-        await frame("Обладнання не знайдено")
+    try:
+        eq = await api.get(f"/api/equipment/{eq_id}")
+    except api.ApiError as e:
+        await frame("Обладнання не знайдено" if e.status == 404 else e.message)
         return
     await frame(eq["name"], f"{eq['type_name']} · {eq['location']} · {eq['ip']}")
     refs = await reference_lists() if is_admin() else None
@@ -314,20 +299,20 @@ async def equipment_card(eq_id: int, period: str = "24h"):
                     ui.button("Редагувати", icon="edit", on_click=lambda: equipment_dialog(
                         refs, lambda: _reload(eq_id), dict(eq))).props("outline")
                     if eq["is_active"]:
-                        ui.button("Обслуговування" if eq["status"] != "maintenance" else "Завершити обслуговування",
-                                  icon="build", on_click=lambda: _set(eq_id, "status = CASE WHEN status = 'maintenance'"
-                                                                     " THEN 'unknown' ELSE 'maintenance' END")
+                        maint = eq["status"] == "maintenance"
+                        ui.button("Завершити обслуговування" if maint else "Обслуговування", icon="build",
+                                  on_click=lambda: _set(eq_id, "end_maintenance" if maint else "maintenance")
                                   ).props("outline color=warning")
                         ui.button("Вивести з експлуатації", icon="block",
-                                  on_click=lambda: _set(eq_id, "is_active = FALSE")).props("outline color=negative")
+                                  on_click=lambda: _set(eq_id, "retire")).props("outline color=negative")
                     else:
                         ui.button("Повернути в експлуатацію", icon="restore",
-                                  on_click=lambda: _set(eq_id, "is_active = TRUE")).props("outline color=positive")
+                                  on_click=lambda: _set(eq_id, "restore")).props("outline color=positive")
         if eq["category"] == "ups":
             with ui.card().classes("w-[340px] p-4"):
                 ui.label("Паспорт ДБЖ").classes("text-lg font-semibold")
                 if eq["rated_power_va"]:
-                    age = (datetime.now().date() - eq["battery_installed_on"]).days if eq["battery_installed_on"] else None
+                    age = (date.today() - dt(eq["battery_installed_on"])).days if eq["battery_installed_on"] else None
                     ups = [("Повна потужність", f"{eq['rated_power_va']} В·А"),
                            ("Активна потужність", f"{eq['rated_power_w'] or '—'} Вт"),
                            ("Ємність АКБ", f"{fmt_num(eq['battery_capacity_ah'])} А·год"),
@@ -342,26 +327,21 @@ async def equipment_card(eq_id: int, period: str = "24h"):
                 else:
                     ui.label("Паспорт не заповнено").classes("text-grey-7")
 
-    metrics = await db.all(
-        "SELECT m.code, m.name, m.unit FROM snmp_oid_map om JOIN metric m ON m.id = om.metric_id"
-        " WHERE om.equipment_type_id = %s ORDER BY m.id", (eq["type_id"],))
-    thresholds = await db.all("SELECT m.code, t.severity, t.min_value, t.max_value FROM threshold t"
-                              " JOIN metric m ON m.id = t.metric_id WHERE t.equipment_type_id = %s AND t.is_active",
-                              (eq["type_id"],))
     state = {"period": period if period in PERIODS else "24h"}
 
     @ui.refreshable
     async def charts():
-        _, span, bucket = PERIODS[state["period"]]
-        now = datetime.now().astimezone()
+        try:
+            data = await api.get(f"/api/equipment/{eq_id}/history", {"period": state["period"]})
+        except api.ApiError as e:
+            ui.label(f"Історія недоступна: {e.message}").classes("text-negative")
+            return
         with ui.grid(columns=2).classes("w-full gap-4 max-lg:grid-cols-1"):
-            for m in metrics:
-                hist = await db.all("SELECT * FROM fn_metric_history(%s, %s, %s, %s, %s::interval)",
-                                    (eq_id, m["code"], now - span, now, bucket))
+            for m in data["metrics"]:
                 k = 1 / 60 if m["code"] == "battery_runtime" else 1 / 86400 if m["code"] == "uptime" else 1
                 unit = "хв" if m["code"] == "battery_runtime" else "д" if m["code"] == "uptime" else m["unit"]
                 lines = []
-                for t in thresholds:
+                for t in data["thresholds"]:
                     if t["code"] == m["code"]:
                         for v in (t["min_value"], t["max_value"]):
                             if v is not None:
@@ -378,17 +358,17 @@ async def equipment_card(eq_id: int, period: str = "24h"):
                         "yAxis": {"type": "value", "scale": True},
                         "series": [{"type": "line", "name": m["name"], "showSymbol": False, "smooth": True,
                                     "lineStyle": {"width": 2, "color": "#1d3557"}, "areaStyle": {"opacity": 0.06},
-                                    "data": [[h["bucket"].isoformat(), round(h["avg_value"] * k, 2)] for h in hist],
+                                    "data": [[h["bucket"], round(h["avg_value"] * k, 2)] for h in m["history"]],
                                     "markLine": {"symbol": "none", "data": lines}}],
                     }).classes("w-full h-56")
 
     with ui.row().classes("items-center gap-3 w-full mt-2"):
         ui.label("Історія показників").classes("text-lg font-semibold")
-        ui.toggle({k: v[0] for k, v in PERIODS.items()}, value=state["period"],
+        ui.toggle(PERIODS, value=state["period"],
                   on_change=lambda e: (state.update(period=e.value), charts.refresh()))
     await charts()
 
-    inc = await db.all("SELECT * FROM v_incident_list WHERE equipment_id = %s ORDER BY opened_at DESC LIMIT 20", (eq_id,))
+    inc = await api.get(f"/api/equipment/{eq_id}/incidents")
     ui.label("Інциденти пристрою").classes("text-lg font-semibold mt-2")
     rows = []
     for i in inc:
@@ -408,17 +388,14 @@ async def equipment_card(eq_id: int, period: str = "24h"):
     t.on("rowClick", lambda e: ui.navigate.to(f"/incidents/{e.args[1]['id']}"))
 
 
-async def _set(eq_id: int, assignment: str):
+async def _set(eq_id: int, action: str):
     try:
-        await db.run(f"UPDATE equipment SET {assignment} WHERE id = %s", (eq_id,), user_id=uid())
-    except Exception as e:
-        ui.notify(f"Не виконано: {error_text(e)}", type="negative", multi_line=True)
+        await api.patch(f"/api/equipment/{eq_id}/state", {"action": action})
+    except api.ApiError as e:
+        ui.notify(f"Не виконано: {e.message}", type="negative", multi_line=True)
         return
     await _reload(eq_id)
 
 
 async def _reload(eq_id: int):
     ui.navigate.to(f"/equipment/{eq_id}")
-
-
-__all__ = ["dashboard", "equipment_list", "equipment_card", "admin_only", "jsonable"]

@@ -1,0 +1,41 @@
+digraph flow_06_gateway {
+  graph [rankdir=TB, splines=ortho, nodesep=0.35, ranksep=0.25, fontname="DejaVu Sans", pad=0.2, forcelabels=true];
+  node [fontname="DejaVu Sans", fontsize=11, width=1.3, height=0.42, color="#1d3557", penwidth=1.1];
+  edge [fontname="DejaVu Sans", fontsize=10, color="#333333", arrowsize=0.7];
+  n1 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Початок: HTTP-запит від Web UI>, margin="0.25,0.06"];
+  n2 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Є дійсний токен<BR/>JWT (підпис, строк)?>, margin="0.02,0.02"];
+  n3 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Відповідь 401 — вхід заново>, margin="0.06,0.03"];
+  n4 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Користувач активний<BR/>у БД?>, margin="0.02,0.02"];
+  n5 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Операція лише для<BR/>адміністратора?>, margin="0.02,0.02"];
+  n6 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Роль —<BR/>адміністратор?>, margin="0.02,0.02"];
+  n7 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Відповідь 403>, margin="0.06,0.03"];
+  n8 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Звіт?>, margin="0.02,0.02"];
+  n9 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">Запит до Reporting Service<BR/>з тим самим токеном</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n10 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">Транзакція БД від імені ролі ng_web;<BR/>netguard.user_id — автор змін</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n11 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Помилка БД?>, margin="0.02,0.02"];
+  n12 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Відповідь 409 / 422 / 403 з текстом СУБД>, margin="0.06,0.03"];
+  n13 [shape=polygon, sides=4, skew=0.3, style=filled, fillcolor="#eef7ef", label=<Відповідь 200 (JSON або файл)>, margin="0.06,0.03"];
+  n14 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Кінець>, margin="0.25,0.06"];
+  n1 -> n2;
+  n2 -> n3 [xlabel=" ні "];
+  n2 -> n4 [xlabel=" так "];
+  n4 -> n3 [xlabel=" ні "];
+  n4 -> n5 [xlabel=" так "];
+  n5 -> n6 [xlabel=" так "];
+  n5 -> n8 [xlabel=" ні "];
+  n6 -> n7 [xlabel=" ні "];
+  n6 -> n8 [xlabel=" так "];
+  n8 -> n9 [xlabel=" так "];
+  n8 -> n10 [xlabel=" ні "];
+  n10 -> n11;
+  n11 -> n12 [xlabel=" так "];
+  n11 -> n13 [xlabel=" ні "];
+  n9 -> n13;
+  n3 -> n14;
+  n7 -> n14;
+  n12 -> n14;
+  n13 -> n14;
+  { rank=same; n3; n4; }
+  { rank=same; n7; n8; }
+  { rank=same; n12; n13; }
+}

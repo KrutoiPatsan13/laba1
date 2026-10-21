@@ -1,21 +1,21 @@
-"""Веб-інтерфейс NetGuard Monitor (API Gateway + інтерфейс користувача).
+"""Web UI — мікросервіс веб-інтерфейсу NetGuard Monitor.
 
 Інтерфейс описано мовою Python засобами NiceGUI: бібліотека перетворює дерево
 Python-об'єктів на веб-сторінки (Vue/Quasar у браузері) й синхронізує їх через
-WebSocket, а HTTP-частину обслуговує FastAPI. Доступ до сторінок — лише після
-входу; права ролей «Сапорт» і «Адміністратор» перевіряються на кожній сторінці.
+WebSocket. До БД сервіс не підключається: дані він отримує з API Gateway за REST
+(модуль api) з токеном користувача, який видає API Gateway / Auth Service під час входу.
+Меню й сторінки адміністратора приховано для ролі «Сапорт», а права ролей ще раз
+перевіряє API Gateway у кожному запиті.
 
-    python -m netguard.web
+    python -m netguard.web                # http://127.0.0.1:8080
 """
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 from nicegui import app, ui
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from ..db import error_text
 from ..settings import settings
-from . import pages_admin, pages_incidents, pages_monitoring, pages_queries, pages_reports  # noqa: F401 (реєстрація сторінок)
-from .common import db
+from . import api
 
 PUBLIC = {"/login"}
 
@@ -24,7 +24,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """Неавтентифікований користувач бачить лише сторінку входу."""
 
     async def dispatch(self, request: Request, call_next):
-        if not app.storage.user.get("authenticated"):
+        if not app.storage.user.get("token"):
             path = request.url.path
             if not path.startswith("/_nicegui") and path not in PUBLIC:
                 return RedirectResponse(f"/login?redirect_to={path}")
@@ -32,13 +32,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(AuthMiddleware)
-app.on_startup(db.open)
-app.on_shutdown(db.close)
+app.on_shutdown(api.close)
 
 
 @ui.page("/login")
 def login_page(redirect_to: str = "/"):
-    if app.storage.user.get("authenticated"):
+    if app.storage.user.get("token"):
         ui.navigate.to("/")
         return
     ui.colors(primary="#1d3557")
@@ -49,15 +48,14 @@ def login_page(redirect_to: str = "/"):
             ui.notify("Введіть логін і пароль", type="warning")
             return
         try:
-            row = await db.run("SELECT * FROM fn_authenticate(%s, %s)", (login.value.strip(), password.value))
-        except Exception as e:
-            ui.notify(f"Помилка БД: {error_text(e)}", type="negative")
+            res = await api.post("/api/auth/login", {"login": login.value.strip(), "password": password.value}, auth=False)
+        except api.ApiError as e:
+            ui.notify(e.message, type="negative")
+            if e.status == 401:
+                password.value = ""
             return
-        if not row:
-            ui.notify("Невірний логін або пароль, або обліковий запис заблоковано", type="negative")
-            password.value = ""
-            return
-        app.storage.user.update(id=row["user_id"], name=row["full_name"], role=row["role_code"], authenticated=True)
+        u = res["user"]
+        app.storage.user.update(token=res["token"], id=u["id"], name=u["name"], role=u["role"], authenticated=True)
         ui.navigate.to(redirect_to if redirect_to.startswith("/") else "/")
 
     with ui.column().classes("absolute-center items-center gap-4"):
@@ -76,9 +74,15 @@ def login_page(redirect_to: str = "/"):
                 .classes("text-xs text-grey-6 text-center w-full")
 
 
-def main():
-    ui.run(title="NetGuard Monitor", port=settings.web_port, storage_secret=settings.storage_secret,
+def run():
+    ui.run(title="NetGuard Monitor", host=settings.bind_host, port=settings.web_port, storage_secret=settings.storage_secret,
            language="uk", favicon="🛰", reload=False, show=False, show_welcome_message=False)
+
+
+def main():
+    # сторінки реєструються декораторами @ui.page під час імпорту модулів
+    from . import pages_admin, pages_incidents, pages_monitoring, pages_queries, pages_reports  # noqa: F401
+    run()
 
 
 if __name__ in {"__main__", "__mp_main__"}:
