@@ -1,0 +1,34 @@
+digraph flow_04_notify {
+  graph [rankdir=TB, splines=ortho, nodesep=0.45, ranksep=0.32, fontname="DejaVu Sans", pad=0.2, forcelabels=true];
+  node [fontname="DejaVu Sans", fontsize=11, width=2.6, height=0.45, color="#1d3557", penwidth=1.1];
+  edge [fontname="DejaVu Sans", fontsize=10, color="#333333", arrowsize=0.7];
+  n1 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Початок (Notification Service)>, margin="0.25,0.06"];
+  n2 [shape=box, label=<LISTEN ng_notification>];
+  n3 [shape=box, label=<Вибрати сповіщення queued<BR/>(FOR UPDATE SKIP LOCKED)>];
+  n4 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Є сповіщення<BR/>в черзі?>, margin="0.02,0.02"];
+  n5 [shape=parallelogram, style=filled, fillcolor="#eef7ef", label=<Надсилання каналом сповіщення:<BR/>веб-панель, e-mail або Telegram>, margin="0.02,0.04"];
+  n6 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Доставлено?>, margin="0.02,0.02"];
+  n7 [shape=box, label=<status = sent,<BR/>sent_at = now()>];
+  n8 [shape=box, label=<status = failed,<BR/>error_message>];
+  n9 [shape=box, label=<Очікування сигналу<BR/>pg_notify (до 5 с)>];
+  n1 -> n2;
+  n2 -> n3;
+  n3 -> n4;
+  n5 -> n6;
+  n4 -> n5 [xlabel=" так "];
+  n4 -> n9 [xlabel=" ні "];
+  n6 -> n7 [xlabel=" так "];
+  n6 -> n8 [xlabel=" ні "];
+  n7 -> n3 [constraint=false];
+  n8 -> n3 [constraint=false];
+  n9 -> n3 [constraint=false];
+  { rank=same; n7; n8; }
+  n10 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Початок (Alerting Service, кожні 15 с)>, margin="0.25,0.06"];
+  n11 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">fn_escalate_overdue('5 min'):<BR/>new → escalated</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n12 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">Тригер incident_events: сповіщення<BR/>адміністраторам (is_escalation)</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n13 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Кінець такту>, margin="0.25,0.06"];
+  n10 -> n11;
+  n11 -> n12;
+  n12 -> n13;
+  { rank=same; n1; n10; }
+}

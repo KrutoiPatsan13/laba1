@@ -1,0 +1,93 @@
+# =====================================================================
+#  NetGuard Monitor — демонстраційна конфігурація SNMP-опитування
+#
+#  Розширення config/snmp_config.yaml для демонстрації програмного продукту:
+#  5 вузлів, 21 пристрій (6 ДБЖ, 12 комутаторів, 3 маршрутизатори).
+#  Пристрої з базового файлу (UPS-DC-01, UPS-OBL-01, SW-DC-CORE-01, SW-OBL-01)
+#  збережено з тими самими іменами, тож застосування цього файлу створює
+#  нову версію конфігурації, а не нові записи для наявних пристроїв.
+#  Вузли Троєщина, Позняки й Виноградар додає скрипт демо-розгортання
+#  (python -m netguard.demo_setup).
+# =====================================================================
+version: 1
+
+defaults:
+  port: 161
+  poll_interval_s: 60
+  timeout_ms: 2000
+  retries: 2
+  offline_after_failures: 3
+
+credentials:
+  ups-v3:
+    version: v3
+    username: netguard-poller
+    auth_protocol: SHA256
+    priv_protocol: AES
+    secret: ${SNMP_UPS_V3_SECRET}
+  net-v2c:
+    version: v2c
+    secret: ${SNMP_NET_COMMUNITY}
+
+profiles:
+  apc-symmetra-px:
+    name: ДБЖ APC Symmetra PX
+    category: ups
+    vendor: APC
+    mib: PowerNet-MIB
+    metrics:
+      battery_charge:      { oid: 1.3.6.1.4.1.318.1.1.1.2.2.1.0 }
+      battery_temperature: { oid: 1.3.6.1.4.1.318.1.1.1.2.2.2.0 }
+      battery_runtime:     { oid: 1.3.6.1.4.1.318.1.1.1.2.2.3.0, scale: 0.01 }
+      battery_voltage:     { oid: 1.3.6.1.4.1.318.1.1.1.2.2.8.0 }
+      input_voltage:       { oid: 1.3.6.1.4.1.318.1.1.1.3.2.1.0 }
+      output_voltage:      { oid: 1.3.6.1.4.1.318.1.1.1.4.2.1.0 }
+      output_load:         { oid: 1.3.6.1.4.1.318.1.1.1.4.2.3.0 }
+
+  cisco-catalyst:
+    name: Комутатор Cisco Catalyst
+    category: switch
+    vendor: Cisco
+    mib: SNMPv2-MIB, CISCO-PROCESS-MIB, CISCO-ENVMON-MIB
+    metrics:
+      uptime:      { oid: 1.3.6.1.2.1.1.3.0, scale: 0.01 }
+      cpu_load:    { oid: 1.3.6.1.4.1.9.9.109.1.1.1.1.8.1 }
+      temperature: { oid: 1.3.6.1.4.1.9.9.13.1.3.1.3.1 }
+
+  mikrotik-ccr:
+    name: Маршрутизатор MikroTik CCR
+    category: router
+    vendor: MikroTik
+    mib: SNMPv2-MIB, HOST-RESOURCES-MIB, MIKROTIK-MIB
+    metrics:
+      uptime:      { oid: 1.3.6.1.2.1.1.3.0, scale: 0.01 }
+      cpu_load:    { oid: 1.3.6.1.2.1.25.3.3.1.2.1 }
+      temperature: { oid: 1.3.6.1.4.1.14988.1.1.3.10.0, scale: 0.1 }
+
+devices:
+  # ЦОД
+  - { name: UPS-DC-01,     ip: 10.0.0.10, location: ЦОД, profile: apc-symmetra-px, credential: ups-v3 }
+  - { name: UPS-DC-02,     ip: 10.0.0.11, location: ЦОД, profile: apc-symmetra-px, credential: ups-v3 }
+  - { name: RT-DC-01,      ip: 10.0.0.1,  location: ЦОД, profile: mikrotik-ccr,    credential: net-v2c, poll_interval_s: 30 }
+  - { name: RT-DC-02,      ip: 10.0.0.3,  location: ЦОД, profile: mikrotik-ccr,    credential: net-v2c, poll_interval_s: 30 }
+  - { name: SW-DC-CORE-01, ip: 10.0.0.2,  location: ЦОД, profile: cisco-catalyst,  credential: net-v2c, poll_interval_s: 30 }
+  - { name: SW-DC-CORE-02, ip: 10.0.0.4,  location: ЦОД, profile: cisco-catalyst,  credential: net-v2c, poll_interval_s: 30 }
+  - { name: SW-DC-ACC-01,  ip: 10.0.0.5,  location: ЦОД, profile: cisco-catalyst,  credential: net-v2c }
+  # Вузол Оболонь
+  - { name: UPS-OBL-01,    ip: 10.1.0.10, location: Вузол Оболонь, profile: apc-symmetra-px, credential: ups-v3 }
+  - { name: RT-OBL-01,     ip: 10.1.0.1,  location: Вузол Оболонь, profile: mikrotik-ccr,    credential: net-v2c }
+  - { name: SW-OBL-01,     ip: 10.1.0.2,  location: Вузол Оболонь, profile: cisco-catalyst,  credential: net-v2c }
+  - { name: SW-OBL-02,     ip: 10.1.0.3,  location: Вузол Оболонь, profile: cisco-catalyst,  credential: net-v2c }
+  # Вузол Троєщина
+  - { name: UPS-TRO-01,    ip: 10.2.0.10, location: Вузол Троєщина, profile: apc-symmetra-px, credential: ups-v3 }
+  - { name: SW-TRO-01,     ip: 10.2.0.2,  location: Вузол Троєщина, profile: cisco-catalyst,  credential: net-v2c }
+  - { name: SW-TRO-02,     ip: 10.2.0.3,  location: Вузол Троєщина, profile: cisco-catalyst,  credential: net-v2c }
+  # Вузол Позняки
+  - { name: UPS-POZ-01,    ip: 10.3.0.10, location: Вузол Позняки, profile: apc-symmetra-px, credential: ups-v3 }
+  - { name: SW-POZ-01,     ip: 10.3.0.2,  location: Вузол Позняки, profile: cisco-catalyst,  credential: net-v2c }
+  - { name: SW-POZ-02,     ip: 10.3.0.3,  location: Вузол Позняки, profile: cisco-catalyst,  credential: net-v2c }
+  # Вузол Виноградар
+  - { name: UPS-VYN-01,    ip: 10.4.0.10, location: Вузол Виноградар, profile: apc-symmetra-px, credential: ups-v3 }
+  - { name: SW-VYN-01,     ip: 10.4.0.2,  location: Вузол Виноградар, profile: cisco-catalyst,  credential: net-v2c }
+  - { name: SW-VYN-02,     ip: 10.4.0.3,  location: Вузол Виноградар, profile: cisco-catalyst,  credential: net-v2c }
+  - { name: SW-VYN-03,     ip: 10.4.0.4,  location: Вузол Виноградар, profile: cisco-catalyst,  credential: net-v2c }

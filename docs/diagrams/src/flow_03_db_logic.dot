@@ -1,0 +1,38 @@
+digraph flow_03_db_logic {
+  graph [rankdir=TB, splines=ortho, nodesep=0.45, ranksep=0.32, fontname="DejaVu Sans", pad=0.2, forcelabels=true];
+  node [fontname="DejaVu Sans", fontsize=11, width=2.6, height=0.45, color="#1d3557", penwidth=1.1];
+  edge [fontname="DejaVu Sans", fontsize=10, color="#333333", arrowsize=0.7];
+  n1 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Початок: INSERT показника<BR/>(тригер reading_check_thresholds)>, margin="0.25,0.06"];
+  n2 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Пристрій<BR/>активний?>, margin="0.02,0.02"];
+  n3 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Є неперевірений активний<BR/>поріг типу та метрики?>, margin="0.02,0.02"];
+  n4 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<value &lt; min_value<BR/>або value &gt; max_value?>, margin="0.02,0.02"];
+  n5 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Є відкритий інцидент<BR/>за цим порогом?>, margin="0.02,0.02"];
+  n6 [shape=box, label=<INSERT INTO incident<BR/>(тип threshold, статус new)>];
+  n7 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">Тригер incident_events: журнал подій,<BR/>fn_enqueue_notifications, pg_notify</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n8 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Кінець>, margin="0.25,0.06"];
+  n1 -> n2;
+  n6 -> n7;
+  n2 -> n3 [xlabel=" так "];
+  n2 -> n8 [xlabel=" ні "];
+  n3 -> n4 [xlabel=" так "];
+  n3 -> n8 [xlabel=" ні "];
+  n4 -> n5 [xlabel=" так "];
+  n4 -> n3 [xlabel=" ні ", constraint=false];
+  n5 -> n6 [xlabel=" ні "];
+  n5 -> n3 [xlabel=" так ", constraint=false];
+  n7 -> n3 [constraint=false];
+  n9 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Початок: CALL sp_register_poll_failure>, margin="0.25,0.06"];
+  n10 [shape=box, label=<failed_polls = failed_polls + 1>];
+  n11 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<failed_polls ≥ N<BR/>(offline_after_failures)?>, margin="0.02,0.02"];
+  n12 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Статус offline<BR/>або maintenance?>, margin="0.02,0.02"];
+  n13 [shape=box, label=<status = offline;<BR/>INSERT incident (тип offline)>];
+  n14 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Кінець>, margin="0.25,0.06"];
+  n9 -> n10;
+  n10 -> n11;
+  n11 -> n12 [xlabel=" так "];
+  n11 -> n14 [xlabel=" ні "];
+  n12 -> n13 [xlabel=" ні "];
+  n12 -> n14 [xlabel=" так "];
+  n13 -> n14;
+  { rank=same; n1; n9; }
+}

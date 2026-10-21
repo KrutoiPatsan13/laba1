@@ -1,0 +1,6 @@
+# NetGuard Monitor — залежності програмного продукту (Python 3.11+)
+nicegui>=3.0          # веб-інтерфейс мовою Python (FastAPI + Vue/Quasar)
+psycopg[binary,pool]>=3.2
+PyYAML>=6.0
+openpyxl>=3.1         # експорт звітів у Excel
+reportlab>=4.0        # експорт звітів у PDF

@@ -1,0 +1,39 @@
+digraph flow_02_poller {
+  graph [rankdir=TB, splines=ortho, nodesep=0.45, ranksep=0.32, fontname="DejaVu Sans", pad=0.2, forcelabels=true];
+  node [fontname="DejaVu Sans", fontsize=11, width=2.6, height=0.45, color="#1d3557", penwidth=1.1];
+  edge [fontname="DejaVu Sans", fontsize=10, color="#333333", arrowsize=0.7];
+  n1 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Початок>, margin="0.25,0.06"];
+  n2 [shape=box, label=<Підключення до БД від імені<BR/>ролі ng_poller>];
+  n3 [shape=parallelogram, style=filled, fillcolor="#eef7ef", label=<План опитування v_snmp_poll_plan:<BR/>пристрої, облікові дані, OID, scale>, margin="0.02,0.04"];
+  n4 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Є пристрій, якому<BR/>настав час опитування?>, margin="0.02,0.02"];
+  n5 [shape=parallelogram, style=filled, fillcolor="#eef7ef", label=<SNMP GET усіх OID пристрою>, margin="0.02,0.04"];
+  n6 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Відповідь<BR/>отримано?>, margin="0.02,0.02"];
+  n7 [shape=box, label=<Значення = сире значення × scale>];
+  n8 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">INSERT INTO metric_reading<BR/>(тригер перевіряє пороги)</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n9 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">CALL sp_register_poll_success</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n10 [shape=box, margin=0, label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="8" BORDER="1" SIDES="R"></TD><TD CELLPADDING="7">CALL sp_register_poll_failure</TD><TD WIDTH="8" BORDER="1" SIDES="L"></TD></TR></TABLE>>];
+  n11 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<Отримано сигнал<BR/>зупинки?>, margin="0.02,0.02"];
+  n12 [shape=diamond, style=filled, fillcolor="#fff6e0", label=<План старший<BR/>за 60 с?>, margin="0.02,0.02"];
+  n13 [shape=box, label=<Перечитати план опитування>];
+  n14 [shape=box, label=<Пауза 1 с>];
+  n15 [shape=box, style="rounded,filled", fillcolor="#e8eef6", label=<Кінець>, margin="0.25,0.06"];
+  n1 -> n2;
+  n2 -> n3;
+  n3 -> n4;
+  n5 -> n6;
+  n7 -> n8;
+  n8 -> n9;
+  n4 -> n5 [xlabel=" так "];
+  n4 -> n11 [xlabel=" ні "];
+  n6 -> n7 [xlabel=" так "];
+  n6 -> n10 [xlabel=" ні "];
+  n9 -> n4 [constraint=false];
+  n10 -> n4 [constraint=false];
+  n11 -> n15 [xlabel=" так "];
+  n11 -> n12 [xlabel=" ні "];
+  n12 -> n13 [xlabel=" так "];
+  n13 -> n14;
+  n12 -> n14 [xlabel=" ні "];
+  n14 -> n4 [constraint=false];
+  { rank=same; n7; n10; }
+}

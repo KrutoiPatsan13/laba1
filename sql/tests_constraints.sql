@@ -16,6 +16,10 @@
 \set QUIET on
 SET search_path TO netguard;
 BEGIN;
+-- перевіряються декларативні обмеження схеми, тому програмна логіка sql/lr2_logic.sql
+-- (автоматичні інциденти, перевірки життєвого циклу) на час тесту вимикається;
+-- без lr2_logic.sql цей параметр ні на що не впливає
+SELECT set_config('netguard.bypass_checks', 'on', true) \gset bypass_
 
 CREATE TEMP TABLE test_result (
     no       INTEGER PRIMARY KEY,
