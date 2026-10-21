@@ -1,0 +1,187 @@
+# NetGuard Monitor — розгортання мікросервісів у контейнерах (Docker Compose).
+#
+#   cp .env.example .env            # задайте секрети: без обов'язкових змінних compose не стартує
+#   docker compose up -d --build    # веб-інтерфейс — http://localhost:8080,
+#                                   # документація API Gateway — http://127.0.0.1:8081/docs
+#
+# Перший старт db розгортає БД (docker/initdb/10-netguard.sh): sql/schema.sql → sql/lr2_logic.sql →
+# sql/seed_reference.sql і, якщо задано NETGUARD_ADMIN_PASSWORD, перший адміністратор; далі
+# Polling Service застосовує YAML-конфігурацію SNMP з config/.
+#
+# Обслуговування — сервіс maintenance (з «up» не запускається):
+#   docker compose run --rm maintenance                                         # секції телеметрії (щомісяця, cron)
+#   docker compose run --rm maintenance python -m netguard.maintenance backup   # копія БД у томі backup
+#   docker compose run --rm maintenance python -m netguard.demo_setup --reset   # демо-дані (усі дані буде видалено);
+#                                                       # у .env — NETGUARD_SNMP_CONFIG_FILE=snmp_config.demo.yaml
+#
+# Усі сервіси — один образ (Dockerfile). Сервіси з доступом до БД підключаються від імені власника
+# схеми netguard і самі перемикаються на свої ролі ng_*; Web UI до БД не підключається. Назовні
+# відкрито лише порт веб-інтерфейсу (і API Gateway — тільки на 127.0.0.1).
+name: netguard
+
+x-app: &app
+  image: netguard-monitor:1.0
+  build: .
+  init: true
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  networks: [netguard]
+  logging: &logging
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
+
+# підключення до БД; пароль — у PGPASSWORD (libpq), а не в рядку DSN
+x-db-env: &db-env
+  NETGUARD_DSN: host=db port=5432 dbname=netguard user=netguard
+  PGPASSWORD: "${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD у .env}"
+
+x-db-ready: &db-ready
+  db:
+    condition: service_healthy
+
+x-check: &check
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 20s
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: netguard
+      POSTGRES_USER: netguard
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD у .env}"
+      NETGUARD_ADMIN_LOGIN: "${NETGUARD_ADMIN_LOGIN:-admin}"
+      NETGUARD_ADMIN_PASSWORD: "${NETGUARD_ADMIN_PASSWORD:-}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+      - ./sql:/opt/netguard/sql:ro
+    shm_size: 256mb                 # паралельні запити звітів (типові 64 МБ /dev/shm замало)
+    healthcheck:
+      # через TCP: поки виконується docker/initdb, сервер слухає лише сокет, тож залежні
+      # сервіси не стартують до завершення розгортання схеми
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "netguard", "-d", "netguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks: [netguard]
+    logging: *logging
+
+  poller:
+    <<: *app
+    command: ["python", "-m", "netguard.services.poller"]
+    environment:
+      <<: *db-env
+      NETGUARD_SNMP_CONFIG: "/etc/netguard/${NETGUARD_SNMP_CONFIG_FILE:-snmp_config.yaml}"
+      NETGUARD_SIM_FAULTS: "${NETGUARD_SIM_FAULTS:-}"
+      SNMP_UPS_V3_SECRET: "${SNMP_UPS_V3_SECRET:-}"
+      SNMP_NET_COMMUNITY: "${SNMP_NET_COMMUNITY:-}"
+    volumes:
+      # каталог, а не окремий файл: зміну, яку редактор зберіг заміною файлу, у змонтованому
+      # окремо файлі контейнер не побачив би
+      - ./config:/etc/netguard:ro
+    depends_on: *db-ready
+
+  alerting:
+    <<: *app
+    command: ["python", "-m", "netguard.services.alerting"]
+    environment:
+      <<: *db-env
+      NETGUARD_ESCALATE_AFTER_MIN: "${NETGUARD_ESCALATE_AFTER_MIN:-5}"
+    depends_on: *db-ready
+
+  notifier:
+    <<: *app
+    command: ["python", "-m", "netguard.services.notifier"]
+    environment:
+      <<: *db-env
+      NETGUARD_NOTIFY_DRY_RUN: "${NETGUARD_NOTIFY_DRY_RUN:-1}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-netguard@localhost}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+    volumes:
+      - notifier-data:/var/lib/netguard     # outbox.log у режимі dry-run
+    depends_on: *db-ready
+
+  reporting:
+    <<: *app
+    command: ["python", "-m", "netguard.reporting"]
+    environment:
+      <<: *db-env
+      NETGUARD_BIND_HOST: 0.0.0.0
+      NETGUARD_REPORTING_PORT: "8082"
+      NETGUARD_JWT_SECRET: "${NETGUARD_JWT_SECRET:?задайте NETGUARD_JWT_SECRET у .env}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=3)"]
+      <<: *check
+    depends_on: *db-ready
+
+  gateway:
+    <<: *app
+    command: ["python", "-m", "netguard.gateway"]
+    environment:
+      <<: *db-env
+      NETGUARD_BIND_HOST: 0.0.0.0
+      NETGUARD_GATEWAY_PORT: "8081"
+      NETGUARD_REPORTING_URL: http://reporting:8082
+      NETGUARD_JWT_SECRET: "${NETGUARD_JWT_SECRET:?задайте NETGUARD_JWT_SECRET у .env}"
+      NETGUARD_JWT_TTL_MIN: "${NETGUARD_JWT_TTL_MIN:-480}"
+    ports:
+      - "127.0.0.1:8081:8081"       # документація API (/docs) — лише з цього комп'ютера
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3)"]
+      <<: *check
+    depends_on:
+      <<: *db-ready
+      reporting:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    command: ["python", "-m", "netguard.web"]
+    environment:
+      NETGUARD_BIND_HOST: 0.0.0.0
+      NETGUARD_WEB_PORT: "8080"
+      NETGUARD_GATEWAY_URL: http://gateway:8081
+      NETGUARD_STORAGE_SECRET: "${NETGUARD_STORAGE_SECRET:?задайте NETGUARD_STORAGE_SECRET у .env}"
+    ports:
+      - "8080:8080"
+    volumes:
+      - web-data:/var/lib/netguard          # сесії користувачів NiceGUI
+    healthcheck:
+      # лише TCP: HTTP-запит без cookie щоразу створює в NiceGUI нове сховище користувача
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 3).close()"]
+      <<: *check
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  # обслуговування БД від імені власника схеми (python -m netguard.maintenance, demo_setup)
+  maintenance:
+    <<: *app
+    profiles: [tools]
+    restart: "no"
+    command: ["python", "-m", "netguard.maintenance", "partitions"]
+    environment: *db-env
+    volumes:
+      - backup:/var/lib/netguard/backup
+      - ./sql:/opt/netguard/sql:ro          # sql/ і config/ потрібні demo_setup
+      - ./config:/opt/netguard/config:ro
+    depends_on: *db-ready
+
+volumes:
+  pgdata:
+  notifier-data:
+  web-data:
+  backup:
+
+networks:
+  netguard:

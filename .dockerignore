@@ -1,0 +1,7 @@
+# У контекст збірки потрапляють лише залежності й пакет netguard (див. Dockerfile);
+# решта — документація, .git, .env із секретами, віртуальні середовища, var/ — ні
+*
+!app/requirements.txt
+!app/netguard/
+**/__pycache__/
+**/*.py[co]
